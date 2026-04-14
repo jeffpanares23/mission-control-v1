@@ -7,9 +7,6 @@
         "php": "^8.2",
         "laravel/framework": "^11.0",
         "guzzlehttp/guzzle": "^7.9",
-        "supabase/supabase-php": "^2.4",
-        "longlang/php-telegram-bot": "^2.0",
-        "team-reflex/discord-php": "^7.0",
         "twilio/sdk": "^8.0"
     },
     "require-dev": {
