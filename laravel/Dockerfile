@@ -17,17 +17,21 @@ COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www
 
-# Copy Laravel app (build context is already the laravel/ folder)
+# Copy Laravel app (build context is the laravel/ folder)
 COPY . .
 
 # Ensure artisan is executable
 RUN chmod +x artisan
 
-# Install dependencies (no scripts yet — artisan exists now)
-RUN composer install --no-interaction --prefer-dist --optimize-autoloader --no-dev
+# Install dependencies without running scripts (artisan may not exist yet in build cache)
+RUN composer install --no-dev --prefer-dist --optimize-autoloader --no-scripts
 
-# Generate app key and discover packages
+# Now that vendor exists, run Laravel setup commands
 RUN php artisan key:generate --force \
+    && php artisan config:clear \
+    && php artisan cache:clear \
+    && php artisan route:clear \
+    && php artisan view:clear \
     && php artisan package:discover --ansi
 
 # Set permissions
