@@ -20,6 +20,9 @@ WORKDIR /var/www
 # Copy Laravel app (build context is already the laravel/ folder)
 COPY . .
 
+# Ensure artisan is executable
+RUN chmod +x artisan
+
 # Install dependencies (no scripts yet — artisan exists now)
 RUN composer install --no-interaction --prefer-dist --optimize-autoloader --no-dev
 
