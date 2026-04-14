@@ -17,8 +17,8 @@ COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www
 
-# Copy Laravel app from laravel/ subdirectory (build context is repo root)
-COPY laravel/. .
+# Copy Laravel app (build context is already the laravel/ folder)
+COPY . .
 
 # Install dependencies (no scripts yet — artisan exists now)
 RUN composer install --no-interaction --prefer-dist --optimize-autoloader --no-dev
