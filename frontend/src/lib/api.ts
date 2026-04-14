@@ -1,144 +1,182 @@
 // ============================================================
 // MISSION CONTROL V1 — API CLIENT
-// Laravel backend + Supabase
+// Direct Supabase REST (bypasses Laravel backend)
 // ============================================================
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+import { supabase } from './supabase'
+import type {
+  Account, Task, TaskStatus, Anniversary,
+  Reminder, Schedule, Insight, AIAgent,
+  ChannelConnection, DashboardSummary,
+} from '@/types'
 
-async function request<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const token = localStorage.getItem('mc_token')
+const SB = 'https://lmymqyrtcuvercqxnvfi.supabase.co/rest/v1'
 
-  const headers: Record<string, string> = {
+// ─── Auth helper ───────────────────────────────────────────
+async function sbHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token ?? ''
+  return {
     'Content-Type': 'application/json',
-    Accept: 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(options.headers as Record<string, string>),
+    'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY as string,
+    'Authorization': `Bearer ${token}`,
+    'Prefer': 'return=representation',
   }
+}
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers,
-  })
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.message || `HTTP ${res.status}`)
-  }
-
+async function sbGet<T>(table: string, params: Record<string, string> = {}): Promise<T[]> {
+  const qs = new URLSearchParams(params).toString()
+  const url = `${SB}/${table}${qs ? '?' + qs : ''}`
+  const res = await fetch(url, { headers: await sbHeaders() })
+  if (!res.ok) return []
   return res.json()
 }
 
+async function sbPost(table: string, data: Record<string, unknown>): Promise<unknown> {
+  const res = await fetch(`${SB}/${table}`, {
+    method: 'POST',
+    headers: await sbHeaders(),
+    body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
+async function sbPatch(table: string, filters: Record<string, string>, data: Record<string, unknown>): Promise<unknown> {
+  const qs = new URLSearchParams(filters).toString()
+  const res = await fetch(`${SB}/${table}?${qs}`, {
+    method: 'PATCH',
+    headers: await sbHeaders(),
+    body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
+async function sbDelete(table: string, filters: Record<string, string>): Promise<unknown> {
+  const qs = new URLSearchParams(filters).toString()
+  const res = await fetch(`${SB}/${table}?${qs}`, {
+    method: 'DELETE',
+    headers: await sbHeaders(),
+  })
+  return res.json()
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function wrap(data: any, fallback: unknown = []): { data: any } {
+  return { data: Array.isArray(data) ? data : fallback }
+}
+
+// ─── Dashboard (client-side aggregation) ──────────────────
+async function dashboardGet(): Promise<{ data: DashboardSummary }> {
+  const [tasks, accounts, insights, schedules] = await Promise.all([
+    sbGet<Task>('tasks', { order: 'created_at.desc', limit: '100' }),
+    sbGet<Account>('accounts'),
+    sbGet<Insight>('insights', { is_dismissed: 'eq.false', order: 'created_at.desc', limit: '10' }),
+    sbGet<Schedule>('schedules', { order: 'start_time.asc', limit: '5' }),
+  ])
+
+  const totalTasks = tasks.length
+  const doneTasks = tasks.filter(t => t.status === 'done').length
+  const overdueTasks = tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== 'done').length
+  const highPriority = tasks.filter(t => t.priority === 'urgent' || t.priority === 'high').length
+  const completionRate = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0
+
+  return {
+    data: {
+      stats: { total_tasks: totalTasks, done_tasks: doneTasks, overdue_tasks: overdueTasks, high_priority_tasks: highPriority, total_accounts: accounts.length, completion_rate: completionRate },
+      recent_tasks: tasks.slice(0, 5),
+      upcoming_schedules: schedules,
+      insights,
+    },
+  }
+}
+
+// ─── API object (same interface as original Laravel-backed api) ────
 export const api = {
-  // ─── Dashboard ────────────────────────────────────────────────
+
+  // ─── Dashboard ────────────────────────────────────────────
   dashboard: {
-    get: () => request<{ data: import('@/types').DashboardSummary }>('/v1/dashboard'),
-    activity: (limit = 50) => request<{ data: unknown[] }>(`/v1/activity?limit=${limit}`),
+    get: dashboardGet,
+    activity: (limit = 50) => sbGet('activity_log', { order: 'created_at.desc', limit: String(limit) }).then(d => wrap(d)),
   },
 
-  // ─── Accounts ──────────────────────────────────────────────
+  // ─── Accounts ─────────────────────────────────────────────
   accounts: {
-    list: () => request<{ data: import('@/types').Account[] }>('/v1/accounts'),
-    get: (id: string) => request<{ data: import('@/types').Account }>(`/v1/accounts/${id}`),
-    create: (data: Partial<import('@/types').Account>) =>
-      request<{ data: unknown }>('/v1/accounts', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: string, data: Partial<import('@/types').Account>) =>
-      request<{ data: unknown }>(`/v1/accounts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-    delete: (id: string) =>
-      request<{ data: null }>(`/v1/accounts/${id}`, { method: 'DELETE' }),
+    list: () => sbGet<Account>('accounts').then(d => wrap(d)),
+    get: (id: string) => sbGet<Account>('accounts', { id: `eq.${id}` }).then(d => wrap(d[0])),
+    create: (data: Partial<Account>) => sbPost('accounts', data).then(d => wrap(d)),
+    update: (id: string, data: Partial<Account>) => sbPatch('accounts', { id: `eq.${id}` }, data).then(d => wrap(d)),
+    delete: (id: string) => sbDelete('accounts', { id: `eq.${id}` }).then(d => wrap(d)),
   },
 
-  // ─── Tasks ─────────────────────────────────────────────────
+  // ─── Tasks ────────────────────────────────────────────────
   tasks: {
     list: (params?: Record<string, string>) => {
-      const qs = params ? '?' + new URLSearchParams(params).toString() : ''
-      return request<{ data: import('@/types').Task[] }>(`/v1/tasks${qs}`)
+      const p = { order: 'position.asc', limit: '100', ...params }
+      return sbGet<Task>('tasks', p).then(d => wrap(d))
     },
-    get: (id: string) => request<{ data: import('@/types').Task }>(`/v1/tasks/${id}`),
-    create: (data: Partial<import('@/types').Task>) =>
-      request<{ data: unknown }>('/v1/tasks', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: string, data: Partial<import('@/types').Task>) =>
-      request<{ data: unknown }>(`/v1/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-    delete: (id: string) =>
-      request<{ data: null }>(`/v1/tasks/${id}`, { method: 'DELETE' }),
+    get: (id: string) => sbGet<Task>('tasks', { id: `eq.${id}` }).then(d => wrap(d[0])),
+    create: (data: Partial<Task>) => sbPost('tasks', data).then(d => wrap(d)),
+    update: (id: string, data: Partial<Task>) => sbPatch('tasks', { id: `eq.${id}` }, data).then(d => wrap(d)),
+    delete: (id: string) => sbDelete('tasks', { id: `eq.${id}` }).then(d => wrap(d)),
     move: (id: string, column_status: string, position: number) =>
-      request<{ data: unknown }>(`/v1/tasks/${id}/move`, {
-        method: 'PATCH', body: JSON.stringify({ column_status, position }),
-      }),
-    status: (id: string, status: import('@/types').TaskStatus) =>
-      request<{ data: unknown }>(`/v1/tasks/${id}/status`, {
-        method: 'PATCH', body: JSON.stringify({ status }),
-      }),
+      sbPatch('tasks', { id: `eq.${id}` }, { column_status, position }).then(d => wrap(d)),
+    status: (id: string, status: TaskStatus) =>
+      sbPatch('tasks', { id: `eq.${id}` }, {
+        status,
+        completed_at: status === 'done' ? new Date().toISOString() : null,
+      }).then(d => wrap(d)),
   },
 
-  // ─── Anniversaries ─────────────────────────────────────────
+  // ─── Anniversaries ────────────────────────────────────────
   anniversaries: {
-    list: () => request<{ data: import('@/types').Anniversary[] }>('/v1/anniversaries'),
-    get: (id: string) => request<{ data: import('@/types').Anniversary }>(`/v1/anniversaries/${id}`),
-    create: (data: Partial<import('@/types').Anniversary>) =>
-      request('/v1/anniversaries', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: string, data: Partial<import('@/types').Anniversary>) =>
-      request(`/v1/anniversaries/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-    delete: (id: string) => request(`/v1/anniversaries/${id}`, { method: 'DELETE' }),
+    list: () => sbGet<Anniversary>('anniversaries', { order: 'anniversary_date.asc' }).then(d => wrap(d)),
+    get: (id: string) => sbGet<Anniversary>('anniversaries', { id: `eq.${id}` }).then(d => wrap(d[0])),
+    create: (data: Partial<Anniversary>) => sbPost('anniversaries', data).then(d => wrap(d)),
+    update: (id: string, data: Partial<Anniversary>) => sbPatch('anniversaries', { id: `eq.${id}` }, data).then(d => wrap(d)),
+    delete: (id: string) => sbDelete('anniversaries', { id: `eq.${id}` }).then(d => wrap(d)),
   },
 
-  // ─── Reminders ──────────────────────────────────────────────
+  // ─── Reminders ────────────────────────────────────────────
   reminders: {
-    list: () => request<{ data: import('@/types').Reminder[] }>('/v1/reminders'),
-    create: (data: Partial<import('@/types').Reminder>) =>
-      request('/v1/reminders', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: string, data: Partial<import('@/types').Reminder>) =>
-      request(`/v1/reminders/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-    delete: (id: string) => request(`/v1/reminders/${id}`, { method: 'DELETE' }),
+    list: () => sbGet<Reminder>('reminders', { order: 'due_date.asc' }).then(d => wrap(d)),
+    create: (data: Partial<Reminder>) => sbPost('reminders', data).then(d => wrap(d)),
+    update: (id: string, data: Partial<Reminder>) => sbPatch('reminders', { id: `eq.${id}` }, data).then(d => wrap(d)),
+    delete: (id: string) => sbDelete('reminders', { id: `eq.${id}` }).then(d => wrap(d)),
   },
 
-  // ─── Schedules ─────────────────────────────────────────────
+  // ─── Schedules ────────────────────────────────────────────
   schedules: {
-    list: () => request<{ data: import('@/types').Schedule[] }>('/v1/schedules'),
-    create: (data: Partial<import('@/types').Schedule>) =>
-      request('/v1/schedules', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: string, data: Partial<import('@/types').Schedule>) =>
-      request(`/v1/schedules/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-    delete: (id: string) => request(`/v1/schedules/${id}`, { method: 'DELETE' }),
+    list: () => sbGet<Schedule>('schedules', { order: 'start_time.asc' }).then(d => wrap(d)),
+    create: (data: Partial<Schedule>) => sbPost('schedules', data).then(d => wrap(d)),
+    update: (id: string, data: Partial<Schedule>) => sbPatch('schedules', { id: `eq.${id}` }, data).then(d => wrap(d)),
+    delete: (id: string) => sbDelete('schedules', { id: `eq.${id}` }).then(d => wrap(d)),
   },
 
-  // ─── Insights ───────────────────────────────────────────────
+  // ─── Insights ────────────────────────────────────────────
   insights: {
-    list: () => request<{ data: import('@/types').Insight[] }>('/v1/insights'),
-    markRead: (id: string) => request(`/v1/insights/${id}/read`, { method: 'PATCH' }),
-    dismiss: (id: string) => request(`/v1/insights/${id}/dismiss`, { method: 'PATCH' }),
+    list: () => sbGet<Insight>('insights', { order: 'created_at.desc' }).then(d => wrap(d)),
+    markRead: (id: string) => sbPatch('insights', { id: `eq.${id}` }, { is_read: true }).then(d => wrap(d)),
+    dismiss: (id: string) => sbPatch('insights', { id: `eq.${id}` }, { is_dismissed: true }).then(d => wrap(d)),
   },
 
-  // ─── AI Agent ─────────────────────────────────────────────
+  // ─── AI Agent (Laravel-backed — returns offline until deployed) ─
   ai: {
-    status: () => request<{ data: import('@/types').AIAgent }>('/v1/ai/status'),
-    chat: (message: string) =>
-      request<{ data: { reply: string; agent_status: string } }>('/v1/ai/chat', {
-        method: 'POST', body: JSON.stringify({ message }),
-      }),
-    dispatch: (taskId: string, instruction: string) =>
-      request('/v1/ai/dispatch', {
-        method: 'POST', body: JSON.stringify({ task_id: taskId, instruction }),
-      }),
+    status: () => Promise.resolve({ data: { id: 'hermes', name: 'Hermes', status: 'offline', model: '', is_active: false, stats: { tasks_dispatched: 0, insights_generated: 0, conversations_handled: 0 }, metadata: {} } as AIAgent }),
+    chat: (_message: string) => Promise.resolve({ data: { reply: 'AI Agent backend not yet deployed. Laravel backend needed for AI features.', agent_status: 'offline' } }),
+    dispatch: (_taskId: string, _instruction: string) => Promise.resolve({ data: null }),
   },
 
-  // ─── Settings ──────────────────────────────────────────────
+  // ─── Settings (client-side only for now) ─────────────────
   settings: {
-    get: () => request<{ data: Record<string, unknown> }>('/v1/settings'),
-    update: (key: string, value: unknown) =>
-      request(`/v1/settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) }),
+    get: () => Promise.resolve({ data: {} }),
+    update: (_key: string, _value: unknown) => Promise.resolve({ data: null }),
   },
 
   // ─── Channels ──────────────────────────────────────────────
   channels: {
-    list: () => request<{ data: import('@/types').ChannelConnection[] }>('/v1/channels'),
-    connectTelegram: (bot_token: string) =>
-      request('/v1/channels/telegram/connect', { method: 'POST', body: JSON.stringify({ bot_token }) }),
-    connectDiscord: (bot_token: string) =>
-      request('/v1/channels/discord/connect', { method: 'POST', body: JSON.stringify({ bot_token }) }),
-    disconnect: (channel: string) =>
-      request(`/v1/channels/${channel}`, { method: 'DELETE' }),
+    list: () => sbGet<ChannelConnection>('channel_connections').then(d => wrap(d)),
+    connectTelegram: (bot_token: string) => sbPost('channel_connections', { channel: 'telegram', bot_token, is_active: true }).then(d => wrap(d)),
+    connectDiscord: (bot_token: string) => sbPost('channel_connections', { channel: 'discord', bot_token, is_active: true }).then(d => wrap(d)),
+    disconnect: (id: string) => sbDelete('channel_connections', { id: `eq.${id}` }).then(d => wrap(d)),
   },
 }

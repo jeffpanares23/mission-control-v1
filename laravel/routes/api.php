@@ -19,6 +19,11 @@ use App\Http\Controllers\Api\DashboardController;
 |--------------------------------------------------------------------------
 */
 
+// ─── Public health check (no auth required) ───────────────
+Route::get('up', function () {
+    return response()->json(['status' => 'ok', 'service' => 'Mission Control API', 'timestamp' => now()->toISOString()]);
+});
+
 Route::prefix('v1')->group(function () {
 
     // ─── Public (webhook entry points) ────────────────────────────
