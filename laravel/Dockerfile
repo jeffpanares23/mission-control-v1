@@ -15,20 +15,17 @@ RUN apt-get update && apt-get install -y \
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Set working directory
 WORKDIR /var/www
 
-# Copy composer files
-COPY composer.json composer.lock* ./
-
-# Install dependencies
-RUN composer install --no-interaction --prefer-dist --optimize-autoloader --no-dev
-
-# Copy application code
+# Copy full Laravel app first (before composer install so artisan exists)
 COPY . .
 
-# Generate app key
-RUN php artisan key:generate --force
+# Install dependencies (no scripts yet — artisan exists now)
+RUN composer install --no-interaction --prefer-dist --optimize-autoloader --no-dev
+
+# Generate app key and discover packages
+RUN php artisan key:generate --force \
+    && php artisan package:discover --ansi
 
 # Set permissions
 RUN chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache \
