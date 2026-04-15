@@ -175,8 +175,104 @@ export const api = {
   // ─── Channels ──────────────────────────────────────────────
   channels: {
     list: () => sbGet<ChannelConnection>('channel_connections').then(d => wrap(d)),
-    connectTelegram: (bot_token: string) => sbPost('channel_connections', { channel: 'telegram', bot_token, is_active: true }).then(d => wrap(d)),
-    connectDiscord: (bot_token: string) => sbPost('channel_connections', { channel: 'discord', bot_token, is_active: true }).then(d => wrap(d)),
-    disconnect: (id: string) => sbDelete('channel_connections', { id: `eq.${id}` }).then(d => wrap(d)),
+    connectTelegram: (bot_token: string) =>
+      sbPost('channel_connections', { channel: 'telegram', bot_token, is_active: true }).then(d => wrap(d)),
+    connectDiscord: (bot_token: string) =>
+      sbPost('channel_connections', { channel: 'discord', bot_token, is_active: true }).then(d => wrap(d)),
+    connectWhatsApp: (account_sid: string, auth_token: string) =>
+      sbPost('channel_connections', {
+        channel: 'whatsapp',
+        channel_meta: { account_sid, auth_token },
+        is_active: true,
+      }).then(d => wrap(d)),
+    delete: (id: string) => sbDelete('channel_connections', { id: `eq.${id}` }).then(d => wrap(d)),
   },
+
+  // ─── Agent Statuses ────────────────────────────────────────
+  agent: {
+    list: () => sbGet('agent_statuses', { order: 'created_at.desc' }).then(d => wrap(d)),
+    upsert: (data: Record<string, unknown>) => sbPost('agent_statuses', data).then(d => wrap(d)),
+    update: (id: string, data: Record<string, unknown>) =>
+      sbPatch('agent_statuses', { id: `eq.${id}` }, data).then(d => wrap(d)),
+    heartbeat: async (agentName: string, status: string) => {
+      const existing = await sbGet<{ id: string }>('agent_statuses', { agent_name: `eq.${agentName}` })
+      if (existing.length > 0) {
+        return sbPatch('agent_statuses', { id: `eq.${existing[0].id}` }, { status, last_seen_at: new Date().toISOString() }).then(d => wrap(d))
+      }
+      return sbPost('agent_statuses', { agent_name: agentName, status, last_seen_at: new Date().toISOString() }).then(d => wrap(d))
+    },
+  },
+
+  // ─── Cron Logs ─────────────────────────────────────────────
+  cron: {
+    list: (limit = 50) => sbGet('cron_logs', { order: 'created_at.desc', limit: String(limit) }).then(d => wrap(d)),
+    create: (data: Record<string, unknown>) => sbPost('cron_logs', data).then(d => wrap(d)),
+    update: (id: string, data: Record<string, unknown>) =>
+      sbPatch('cron_logs', { id: `eq.${id}` }, data).then(d => wrap(d)),
+    logStart: async (agentName: string, jobName: string) => {
+      return sbPost('cron_logs', {
+        agent_name: agentName,
+        job_name: jobName,
+        status: 'running',
+        started_at: new Date().toISOString(),
+      }).then(d => wrap(d))
+    },
+    logFinish: async (id: string, status: 'success' | 'failed', message?: string) => {
+      const finishedAt = new Date().toISOString()
+      return sbPatch('cron_logs', { id: `eq.${id}` }, {
+        status,
+        finished_at: finishedAt,
+        message,
+      }).then(d => wrap(d))
+    },
+  },
+}
+
+// ─── Realtime subscriptions ─────────────────────────────────
+export type RealtimeChannel = ReturnType<typeof supabase.channel>
+
+export function subscribeToTasks(callback: (task: Task, action: 'INSERT' | 'UPDATE' | 'DELETE') => void) {
+  return supabase
+    .channel('tasks-realtime')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
+      callback(payload.new as Task, payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE')
+    })
+    .subscribe()
+}
+
+export function subscribeToSchedules(callback: (schedule: Schedule, action: 'INSERT' | 'UPDATE' | 'DELETE') => void) {
+  return supabase
+    .channel('schedules-realtime')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'schedules' }, (payload) => {
+      callback(payload.new as Schedule, payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE')
+    })
+    .subscribe()
+}
+
+export function subscribeToReminders(callback: (reminder: Reminder, action: 'INSERT' | 'UPDATE' | 'DELETE') => void) {
+  return supabase
+    .channel('reminders-realtime')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'reminders' }, (payload) => {
+      callback(payload.new as Reminder, payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE')
+    })
+    .subscribe()
+}
+
+export function subscribeToInsights(callback: (insight: Insight, action: 'INSERT' | 'UPDATE' | 'DELETE') => void) {
+  return supabase
+    .channel('insights-realtime')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'insights' }, (payload) => {
+      callback(payload.new as Insight, payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE')
+    })
+    .subscribe()
+}
+
+export function subscribeToAgentStatus(callback: (status: Record<string, unknown>, action: 'INSERT' | 'UPDATE') => void) {
+  return supabase
+    .channel('agent-status-realtime')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'agent_statuses' }, (payload) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      callback(payload.new as any, payload.eventType as 'INSERT' | 'UPDATE')
+    })
+    .subscribe()
 }

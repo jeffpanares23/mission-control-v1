@@ -3,13 +3,14 @@ import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import { RightPanel } from './RightPanel'
-import { api } from '@/lib/api'
+import { api, subscribeToTasks, subscribeToSchedules, subscribeToInsights } from '@/lib/api'
 import type { DashboardSummary, Insight } from '@/types'
 
 export function AppShell() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [insights, setInsights] = useState<Insight[]>([])
 
+  // ─── Initial data load ──────────────────────────────────────
   useEffect(() => {
     api.dashboard.get()
       .then(res => {
@@ -19,6 +20,38 @@ export function AppShell() {
       .catch(() => { /* demo mode — UI stays graceful */ })
   }, [])
 
+  // ─── Realtime: task changes ─────────────────────────────────
+  useEffect(() => {
+    const sub = subscribeToTasks(() => {
+      // Refresh dashboard stats on any task change
+      api.dashboard.get().then(res => setSummary(res.data)).catch(() => {})
+    })
+    return () => { sub.unsubscribe() }
+  }, [])
+
+  // ─── Realtime: schedule changes ─────────────────────────────
+  useEffect(() => {
+    const sub = subscribeToSchedules(() => {
+      // Child pages manage their own schedule state; just refresh dashboard
+      api.dashboard.get().then(res => setSummary(res.data)).catch(() => {})
+    })
+    return () => { sub.unsubscribe() }
+  }, [])
+
+  // ─── Realtime: insight changes ──────────────────────────────
+  useEffect(() => {
+    const sub = subscribeToInsights((insight, action) => {
+      setInsights(prev => {
+        if (action === 'INSERT') return [insight, ...prev]
+        if (action === 'UPDATE') return prev.map(i => i.id === insight.id ? insight : i)
+        if (action === 'DELETE') return prev.filter(i => i.id !== insight.id)
+        return prev
+      })
+    })
+    return () => { sub.unsubscribe() }
+  }, [])
+
+  // ─── Insight actions ────────────────────────────────────────
   const dismissInsight = (id: string) => {
     setInsights(prev => prev.map(i => i.id === id ? { ...i, is_dismissed: true } : i))
     api.insights.dismiss(id).catch(() => {})
