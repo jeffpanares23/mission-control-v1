@@ -246,15 +246,56 @@ class AuthService
 
     /**
      * Get all agents accessible by a user.
+     * Falls back to direct query if RPC is unavailable.
      */
     public function getUserAgents(string $userId): array
     {
-        $result = $this->supabase->rpc(
-            'get_user_agents',
-            ['p_user_id' => $userId],
+        // Try RPC first
+        try {
+            $result = $this->supabase->rpc(
+                'get_user_agents',
+                ['p_user_id' => $userId],
+                $this->serviceRoleKey
+            );
+            if (is_array($result) && !isset($result['error'])) {
+                return $result;
+            }
+        } catch (\Throwable $e) {
+            // RPC unavailable — fall through to direct query
+        }
+
+        // Fallback: direct join query
+        $access = $this->supabase->get(
+            'user_agent_access',
+            [
+                'select' => 'agent_id,is_active,can_admin',
+                'user_id' => "eq.{$userId}",
+            ],
             $this->serviceRoleKey
         );
-        return is_array($result) ? $result : [];
+        if (!is_array($access) || count($access) === 0) return [];
+
+        $agentIds = array_column($access, 'agent_id');
+        if (count($agentIds) === 0) return [];
+
+        $agents = $this->supabase->get(
+            'agents',
+            [
+                'select' => 'id,slug,name,is_active',
+                'id' => 'in.(' . implode(',', $agentIds) . ')',
+            ],
+            $this->serviceRoleKey
+        );
+        if (!is_array($agents)) return [];
+
+        $accessMap = array_column($access, null, 'agent_id');
+        return array_map(fn($a) => [
+            'agent_id'  => $a['id'],
+            'slug'      => $a['slug'],
+            'name'      => $a['name'],
+            'is_active' => $accessMap[$a['id']]['is_active'] ?? false,
+            'can_admin' => $accessMap[$a['id']]['can_admin'] ?? false,
+        ], $agents);
     }
 
     /**
