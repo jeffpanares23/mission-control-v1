@@ -30,3 +30,4 @@ npm-debug.log*
 /storage/*.key
 /bootstrap/cache/
 phpunit.result.cache
+.vercel

@@ -15,11 +15,12 @@ const SB = 'https://lmymqyrtcuvercqxnvfi.supabase.co/rest/v1'
 // ─── Auth helper ───────────────────────────────────────────
 async function sbHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession()
-  const token = data.session?.access_token ?? ''
+  const sessionToken = data.session?.access_token
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
   return {
     'Content-Type': 'application/json',
-    'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY as string,
-    'Authorization': `Bearer ${token}`,
+    'apikey': anonKey,
+    'Authorization': sessionToken ? `Bearer ${sessionToken}` : `Bearer ${anonKey}`,
     'Prefer': 'return=representation',
   }
 }
