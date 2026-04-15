@@ -13,7 +13,7 @@ class ChannelController extends BaseApiController
     public function index(Request $request)
     {
         $userId = $this->userId($request);
-        $result = $this->supabase->get('channel_connections', ['user_id' => "eq.{$userId}"]);
+        $result = $this->db($request)->get('channel_connections', ['user_id' => "eq.{$userId}"]);
         return $this->ok($result['error'] ? [] : $result);
     }
 
@@ -32,14 +32,14 @@ class ChannelController extends BaseApiController
         }
         $botInfo = $response->json();
 
-        // Upsert channel connection
-        $this->supabase->insert('channel_connections', [
+        // Upsert channel connection (uses agent's service role key to bypass RLS)
+        $this->db($request)->insert('channel_connections', [
             'user_id' => $userId,
             'channel' => 'telegram',
             'bot_token' => $request->bot_token,
             'channel_name' => $botInfo['result']['username'] ?? 'Telegram Bot',
             'is_active' => true,
-        ], 'on_conflict=user_id:channel'); // Supabase uses this on conflict handling
+        ]);
 
         return $this->ok(['bot_username' => $botInfo['result']['username']], 'Telegram bot connected');
     }
@@ -70,12 +70,12 @@ class ChannelController extends BaseApiController
             return $this->error('Invalid Discord bot token', 422);
         }
 
-        $this->supabase->insert('channel_connections', [
+        $this->db($request)->insert('channel_connections', [
             'user_id' => $userId,
             'channel' => 'discord',
             'bot_token' => $request->bot_token,
             'is_active' => true,
-        ], 'on_conflict=user_id:channel');
+        ]);
 
         return $this->ok(null, 'Discord bot connected');
     }
@@ -99,7 +99,7 @@ class ChannelController extends BaseApiController
         $request->validate(['account_sid' => 'required|string', 'auth_token' => 'required|string']);
         $userId = $this->userId($request);
 
-        $this->supabase->insert('channel_connections', [
+        $this->db($request)->insert('channel_connections', [
             'user_id' => $userId,
             'channel' => 'whatsapp',
             'channel_meta' => [
@@ -107,7 +107,7 @@ class ChannelController extends BaseApiController
                 'auth_token' => $request->auth_token,
             ],
             'is_active' => true,
-        ], 'on_conflict=user_id:channel');
+        ]);
 
         return $this->ok(null, 'WhatsApp connected');
     }
@@ -118,7 +118,7 @@ class ChannelController extends BaseApiController
     public function disconnect(Request $request, string $channel)
     {
         $userId = $this->userId($request);
-        $result = $this->supabase->update('channel_connections',
+        $result = $this->db($request)->update('channel_connections',
             ['user_id' => $userId, 'channel' => $channel],
             ['is_active' => false]
         );

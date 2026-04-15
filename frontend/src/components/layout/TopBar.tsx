@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Search, Bell, Bot, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
+import { useAuth } from '@/contexts/AuthContext'
 import type { AIAgentStatus } from '@/types'
 
 const agentStatusLabel: Record<AIAgentStatus, string> = {
@@ -26,6 +27,10 @@ export function TopBar({ stats }: TopBarProps) {
   const [agentStatus, setAgentStatus] = useState<AIAgentStatus>('idle')
   const [agentName] = useState('Hermes')
   const [searchVal, setSearchVal] = useState('')
+  const { user } = useAuth()
+
+  const userName = user?.full_name || user?.email?.split('@')[0] || 'User'
+  const userInitials = userName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
 
   useEffect(() => {
     api.ai.status()
@@ -90,8 +95,8 @@ export function TopBar({ stats }: TopBarProps) {
           <Bot className="w-[15px] h-[15px]" />
         </button>
         <div style={{ width: '1px', height: '20px', background: 'var(--color-border)', margin: '0 4px' }} />
-        <div className="avatar" style={{ width: '28px', height: '28px', background: 'var(--color-accent-dim)', color: 'var(--color-accent)', fontSize: '10px' }}>
-          JD
+        <div className="avatar" style={{ width: '28px', height: '28px', background: 'var(--color-accent-dim)', color: 'var(--color-accent)', fontSize: '10px', fontWeight: 700 }}>
+          {userInitials}
         </div>
       </div>
     </header>

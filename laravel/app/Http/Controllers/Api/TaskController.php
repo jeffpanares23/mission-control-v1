@@ -9,27 +9,27 @@ class TaskController extends BaseApiController
     public function index(Request $request)
     {
         $userId = $this->userId($request);
-        $view = $request->input('view', 'kanban');
+        $view   = $request->input('view', 'kanban');
 
         $params = ['user_id' => "eq.{$userId}", 'order' => 'position.asc'];
-        if ($request->has('status')) $params['status'] = 'eq.' . $request->input('status');
+        if ($request->has('status'))   $params['status']   = 'eq.' . $request->input('status');
         if ($request->has('priority')) $params['priority'] = 'eq.' . $request->input('priority');
 
-        $result = $this->supabase->get('tasks', $params);
+        $result = $this->db($request)->get('tasks', $params);
         return $this->ok($result['error'] ? [] : $result);
     }
 
     public function store(Request $request)
     {
-        $userId = $this->userId($request);
+        $userId  = $this->userId($request);
         $payload = array_merge($request->only([
             'title','description','status','priority','due_date','account_id',
             'assigned_to','tags','column_status','metadata'
         ]), [
-            'user_id' => $userId,
+            'user_id'  => $userId,
             'position' => $request->input('position', 0),
         ]);
-        $result = $this->supabase->insert('tasks', $payload);
+        $result = $this->db($request)->insert('tasks', $payload);
         return $result['error']
             ? $this->error('Failed to create task', 422)
             : $this->ok($result, 'Task created', 201);
@@ -37,7 +37,7 @@ class TaskController extends BaseApiController
 
     public function show(Request $request, string $id)
     {
-        $data = $this->supabase->get('tasks', ['id' => "eq.{$id}"]);
+        $data  = $this->db($request)->get('tasks', ['id' => "eq.{$id}"]);
         $items = $data['error'] ? [] : $data;
         return count($items) ? $this->ok($items[0]) : $this->error('Not found', 404);
     }
@@ -48,10 +48,10 @@ class TaskController extends BaseApiController
             'title','description','status','priority','due_date','account_id',
             'assigned_to','tags','position','column_status','metadata'
         ]);
-        $result = $this->supabase->update('tasks', ['id' => $id], $payload);
+        $result = $this->db($request)->update('tasks', ['id' => $id], $payload);
 
         if ($request->input('status') === 'done' && !empty($payload['completed_at'] === false)) {
-            $this->supabase->update('tasks', ['id' => $id], ['completed_at' => now()->toDateTimeString()]);
+            $this->db($request)->update('tasks', ['id' => $id], ['completed_at' => now()->toDateTimeString()]);
         }
 
         return $result['error'] ? $this->error('Update failed', 422) : $this->ok($result);
@@ -59,7 +59,7 @@ class TaskController extends BaseApiController
 
     public function destroy(Request $request, string $id)
     {
-        $result = $this->supabase->delete('tasks', ['id' => $id]);
+        $result = $this->db($request)->delete('tasks', ['id' => $id]);
         return $result['error'] ? $this->error('Delete failed', 422) : $this->ok(null, 'Task deleted');
     }
 
@@ -70,7 +70,7 @@ class TaskController extends BaseApiController
     public function move(Request $request, string $id)
     {
         $payload = $request->only(['column_status', 'position']);
-        $result = $this->supabase->update('tasks', ['id' => $id], $payload);
+        $result  = $this->db($request)->update('tasks', ['id' => $id], $payload);
         return $result['error'] ? $this->error('Move failed', 422) : $this->ok($result, 'Task moved');
     }
 
@@ -84,7 +84,7 @@ class TaskController extends BaseApiController
         if ($request->input('status') === 'done') {
             $payload['completed_at'] = now()->toDateTimeString();
         }
-        $result = $this->supabase->update('tasks', ['id' => $id], $payload);
+        $result = $this->db($request)->update('tasks', ['id' => $id], $payload);
         return $result['error'] ? $this->error('Status update failed', 422) : $this->ok($result, 'Status updated');
     }
 }

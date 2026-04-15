@@ -12,6 +12,8 @@ use App\Http\Controllers\Api\ChannelController;
 use App\Http\Controllers\Api\AIAgentController;
 use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\UserController;
 
 /*
 |--------------------------------------------------------------------------
@@ -19,7 +21,7 @@ use App\Http\Controllers\Api\DashboardController;
 |--------------------------------------------------------------------------
 */
 
-// ─── Public health check (no auth required) ───────────────
+// ─── Public health check ────────────────────────────────────
 Route::get('up', function () {
     return response()->json(['status' => 'ok', 'service' => 'Mission Control API', 'timestamp' => now()->toISOString()]);
 });
@@ -30,10 +32,23 @@ Route::prefix('v1')->group(function () {
     Route::post('webhooks/telegram', [ChannelController::class, 'telegramWebhook']);
     Route::post('webhooks/discord',  [ChannelController::class, 'discordWebhook']);
 
-    // ─── Authenticated routes ( Sanctum / token ) ──────────────────
-    Route::middleware('auth:sanctum')->group(function () {
+    // ─── Public auth routes ────────────────────────────────────────
+    Route::post('auth/login',    [AuthController::class, 'login']);
+    Route::post('auth/register', [AuthController::class, 'register']);
 
-        // Dashboard summary
+    // ─── Protected routes (Laravel JWT + agent DB routing) ─────────
+    Route::middleware('agent.auth')->group(function () {
+
+        // Auth management
+        Route::post('auth/logout',      [AuthController::class, 'logout']);
+        Route::get('auth/me',           [AuthController::class, 'me']);
+        Route::get('auth/agents',       [AuthController::class, 'agents']);
+        Route::post('auth/switch-agent', [AuthController::class, 'switchAgent']);
+
+        // ─── User management (super_admin only via controller check) ─
+        Route::apiResource('users', UserController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
+
+        // ─── Dashboard ────────────────────────────────────────────────
         Route::get('dashboard', [DashboardController::class, 'index']);
 
         // ─── Accounts ──────────────────────────────────────────────

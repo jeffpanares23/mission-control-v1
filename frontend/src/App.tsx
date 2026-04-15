@@ -1,42 +1,39 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import { useEffect, useState } from 'react'
-import { AppShell } from '@/components/layout/AppShell'
-import { DashboardPage } from '@/pages/DashboardPage'
-import { AccountsPage } from '@/pages/AccountsPage'
-import { TasksPage } from '@/pages/TasksPage'
-import { AnniversariesPage } from '@/pages/AnniversariesPage'
-import { RemindersPage } from '@/pages/RemindersPage'
-import { SchedulesPage } from '@/pages/SchedulesPage'
-import { AnalyticsPage } from '@/pages/AnalyticsPage'
-import { ReportsPage } from '@/pages/ReportsPage'
-import { AIPage } from '@/pages/AIPage'
-import { ChannelsPage } from '@/pages/ChannelsPage'
-import { SettingsPage } from '@/pages/SettingsPage'
-import { supabase } from '@/lib/supabase'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider } from './contexts/AuthContext'
+import { ProtectedRoute } from './components/auth/ProtectedRoute'
+import { AppShell } from './components/layout/AppShell'
+import LoginPage from './pages/LoginPage'
+import { DashboardPage } from './pages/DashboardPage'
+import { AccountsPage } from './pages/AccountsPage'
+import { TasksPage } from './pages/TasksPage'
+import { AnniversariesPage } from './pages/AnniversariesPage'
+import { RemindersPage } from './pages/RemindersPage'
+import { SchedulesPage } from './pages/SchedulesPage'
+import { AnalyticsPage } from './pages/AnalyticsPage'
+import { ReportsPage } from './pages/ReportsPage'
+import { AIPage } from './pages/AIPage'
+import { ChannelsPage } from './pages/ChannelsPage'
+import { SettingsPage } from './pages/SettingsPage'
+import { AdminUsersPage } from './pages/AdminUsersPage'
 
-function AuthInitializer({ children }: { children: React.ReactNode }) {
-  const [ready, setReady] = useState(false)
-
-  useEffect(() => {
-    // Anonymous auth — creates a Supabase session for RLS
-    supabase.auth.signInAnonymously()
-      .then(({ error }) => {
-        if (error) console.warn('Supabase anon auth failed:', error.message)
-        setReady(true)
-      })
-  }, [])
-
-  if (!ready) return null
-  return <>{children}</>
-}
-
-export default function App() {
+function App() {
   return (
     <BrowserRouter>
-      <AuthInitializer>
+      <AuthProvider>
         <Routes>
-          <Route element={<AppShell />}>
-            <Route path="/" element={<DashboardPage />} />
+          {/* Public */}
+          <Route path="/login" element={<LoginPage />} />
+
+          {/* Protected — all app routes */}
+          <Route
+            element={
+              <ProtectedRoute>
+                <AppShell />
+              </ProtectedRoute>
+            }
+          >
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/tasks" element={<TasksPage />} />
             <Route path="/anniversaries" element={<AnniversariesPage />} />
@@ -47,9 +44,21 @@ export default function App() {
             <Route path="/ai" element={<AIPage />} />
             <Route path="/channels" element={<ChannelsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+
+            {/* Super admin only */}
+            <Route
+              path="/admin/users"
+              element={
+                <ProtectedRoute adminOnly>
+                  <AdminUsersPage />
+                </ProtectedRoute>
+              }
+            />
           </Route>
         </Routes>
-      </AuthInitializer>
+      </AuthProvider>
     </BrowserRouter>
   )
 }
+
+export default App

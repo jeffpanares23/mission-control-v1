@@ -13,7 +13,7 @@ class SettingsController extends BaseApiController
     public function index(Request $request)
     {
         $userId = $this->userId($request);
-        $result = $this->supabase->get('settings', ['user_id' => "eq.{$userId}"]);
+        $result = $this->db($request)->get('settings', ['user_id' => "eq.{$userId}"]);
 
         if (!empty($result['error'])) {
             return $this->error('Failed to load settings', 422);
@@ -38,21 +38,21 @@ class SettingsController extends BaseApiController
         $userId = $this->userId($request);
 
         // Try update first
-        $existing = $this->supabase->get('settings', [
+        $existing = $this->db($request)->get('settings', [
             'user_id' => "eq.{$userId}",
-            'key' => "eq.{$key}",
+            'key'     => "eq.{$key}",
         ]);
 
         if (!empty($existing) && is_array($existing) && count($existing) > 0) {
-            $result = $this->supabase->update('settings',
+            $result = $this->db($request)->update('settings',
                 ['user_id' => $userId, 'key' => $key],
                 ['value' => $request->input('value')]
             );
         } else {
-            $result = $this->supabase->insert('settings', [
+            $result = $this->db($request)->insert('settings', [
                 'user_id' => $userId,
-                'key' => $key,
-                'value' => $request->input('value'),
+                'key'     => $key,
+                'value'   => $request->input('value'),
             ]);
         }
 
