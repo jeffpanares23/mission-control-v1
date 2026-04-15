@@ -68,7 +68,7 @@ class AgentAuth
     {
         $user = $request->attributes->get('user');
 
-        if (!($user['role'] ?? null) === 'super_admin') {
+        if (($user['role'] ?? null) !== 'super_admin') {
             return response()->json([
                 'error' => 'Super admin access required.',
                 'code'  => 'FORBIDDEN',

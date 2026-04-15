@@ -14,8 +14,9 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         // Register middleware aliases
         $middleware->alias([
-            'supabase.auth' => \App\Http\Middleware\ValidateSupabaseToken::class,
-            'agent.auth'    => \App\Http\Middleware\AgentAuth::class,
+            'supabase.auth'    => \App\Http\Middleware\ValidateSupabaseToken::class,
+            'agent.auth'       => \App\Http\Middleware\AgentAuth::class,
+            'agent.super_admin' => \App\Http\Middleware\AgentAuth::class.'@handleSuperAdmin',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
