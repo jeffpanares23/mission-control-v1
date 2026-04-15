@@ -86,27 +86,7 @@ class SeedAgentsAndUsers extends Command
         ];
 
         foreach ($agents as $agent) {
-            // Try to upsert (Postgres upsert)
-            $result = $this->supabase->rpc(
-                'upsert_agent',
-                [
-                    'p_slug'         => $agent['slug'],
-                    'p_name'         => $agent['name'],
-                    'p_url'          => $agent['supabase_url'],
-                    'p_key'          => $agent['supabase_key'],
-                    'p_anon'         => $agent['anon_key'],
-                    'p_is_active'    => $agent['is_active'],
-                ],
-                $this->serviceRoleKey
-            );
-
-            if (isset($result['error'])) {
-                // Fallback: try insert then update
-                $this->warn("  Agent {$agent['name']}: RPC failed ({$result['error']}), trying direct upsert...");
-                $this->directUpsertAgent($agent);
-            } else {
-                $this->line("  ✓ Agent: {$agent['name']}");
-            }
+            $this->directUpsertAgent($agent);
         }
     }
 
