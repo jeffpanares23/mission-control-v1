@@ -42,8 +42,8 @@ export function DashboardPage() {
       api.dashboard.get().catch(() => null),
       api.tasks.list().catch(() => null),
     ]).then(([dashRes, tasksRes]) => {
-      if (dashRes?.data) setStats(dashRes.data.stats)
-      if (tasksRes?.data) setTasks(tasksRes.data)
+      if (dashRes) setStats(dashRes.stats)
+      if (tasksRes) setTasks(tasksRes)
       setLoading(false)
     })
   }, [])

@@ -63,7 +63,7 @@ export default function LoginPage() {
 
     try {
       window.Telegram.Login.auth(
-        { bot_username: TELEGRAM_BOT_USERNAME, request_access: 'write' },
+        { bot_username: TELEGRAM_BOT_USERNAME!, request_access: 'write' },
         handleTelegramAuth
       )
     } catch {
@@ -109,11 +109,11 @@ export default function LoginPage() {
 
       const json = await res.json()
 
-      if (!res.ok || !json.data?.access_token) {
+      if (!res.ok || !json.access_token) {
         throw new Error(json.error?.message || 'Telegram authentication failed.')
       }
 
-      const { access_token, user } = json.data
+      const { access_token, user } = json
 
       // Persist session (matching the shape AuthContext expects)
       localStorage.setItem('mc_session', JSON.stringify({

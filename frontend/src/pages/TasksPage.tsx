@@ -19,7 +19,7 @@ export function TasksPage() {
 
   useEffect(() => {
     api.tasks.list()
-      .then(res => setTasks(res.data ?? []))
+      .then(res => setTasks(res))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])

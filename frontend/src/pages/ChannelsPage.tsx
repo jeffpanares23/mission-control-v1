@@ -43,7 +43,7 @@ export function ChannelsPage() {
 
   useEffect(() => {
     api.channels.list()
-      .then(res => setConnections(res.data ?? []))
+      .then(res => setConnections(res))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
@@ -65,28 +65,48 @@ export function ChannelsPage() {
 
     setConnecting(channelId)
     try {
-      let res
       if (channelId === 'telegram') {
-        res = await api.channels.connectTelegram(formData.bot_token)
-      } else if (channelId === 'discord') {
-        res = await api.channels.connectDiscord(formData.bot_token)
-      } else if (channelId === 'whatsapp') {
-        res = await api.channels.connectWhatsApp(formData.account_sid, formData.auth_token)
-      }
-
-      if (res?.data) {
+        const { bot_username } = await api.channels.connectTelegram(formData.bot_token)
         setConnections(prev => {
           const idx = prev.findIndex(c => c.channel === channelId)
           if (idx >= 0) {
             const updated = [...prev]
-            updated[idx] = { ...updated[idx], ...(res.data as ChannelConnection) }
+            updated[idx] = { ...updated[idx], is_active: true, channel_name: bot_username }
             return updated
           }
-          return [...prev, res.data as ChannelConnection]
+          return [...prev, {
+            id: `temp-${channelId}`,
+            channel: channelId as 'telegram',
+            is_active: true,
+            channel_name: bot_username,
+            channel_meta: {},
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }]
         })
-        setShowForm(null)
-        setFormData({})
+      } else if (channelId === 'discord') {
+        await api.channels.connectDiscord(formData.bot_token)
+        setConnections(prev => [...prev, {
+          id: `temp-${channelId}`,
+          channel: channelId as 'discord',
+          is_active: true,
+          channel_meta: {},
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }])
+      } else if (channelId === 'whatsapp') {
+        await api.channels.connectWhatsApp(formData.account_sid, formData.auth_token)
+        setConnections(prev => [...prev, {
+          id: `temp-${channelId}`,
+          channel: channelId as 'whatsapp',
+          is_active: true,
+          channel_meta: {},
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }])
       }
+      setShowForm(null)
+      setFormData({})
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : 'Connection failed')
     } finally {
@@ -96,7 +116,7 @@ export function ChannelsPage() {
 
   const handleDisconnect = async (conn: ChannelConnection) => {
     try {
-      await api.channels.delete(conn.id)
+      await api.channels.disconnect(conn.channel)
       setConnections(prev => prev.filter(c => c.id !== conn.id))
     } catch {
       // silent

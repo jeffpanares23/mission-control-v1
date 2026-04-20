@@ -1,5 +1,6 @@
 // Central auth types — re-exported from lib/api for compatibility
 export type { AuthUser, AuthAgent } from '@/lib/api'
+import type { AuthUser } from '@/lib/api'
 
 export interface LoginCredentials {
   email: string
