@@ -10,7 +10,7 @@ export function RemindersPage() {
 
   useEffect(() => {
     api.reminders.list()
-      .then(res => setItems(res.data))
+      .then(res => setItems(res))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])

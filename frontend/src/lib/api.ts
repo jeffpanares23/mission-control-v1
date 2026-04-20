@@ -6,7 +6,7 @@
 
 import type {
   Account, Task, TaskStatus, Anniversary,
-  Reminder, Schedule, Insight, AIAgent,
+  Reminder, Schedule, Insight,
   ChannelConnection, DashboardSummary,
 } from '@/types'
 
@@ -109,6 +109,17 @@ export const api = {
       get<Array<{ agent_id: string; slug: string; name: string; is_active: boolean; can_admin: boolean }>>('/auth/agents'),
     switchAgent: (agentId: string) =>
       post<{ user: AuthUser; agent: AuthAgent | null }>('/auth/switch-agent', { agent_id: agentId }),
+    /**
+     * POST /api/v1/auth/telegram
+     * Body: { initData } — raw Telegram WebApp initData string
+     *
+     * Validates initData on the backend (HMAC-SHA256 against bot token),
+     * finds or creates the user by telegram_user_id, and returns a JWT.
+     */
+    telegram: (initData: string) =>
+      post<{ access_token: string; token_type: string; expires_in: number; user: AuthUser }>(
+        '/auth/telegram', { initData }
+      ),
   },
 
   // ─── Admin (super_admin only) ───────────────────────────────

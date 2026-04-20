@@ -55,6 +55,30 @@ class AuthController extends BaseApiController
         return $this->ok($result, 'Registration successful', 201);
     }
 
+    /**
+     * POST /api/v1/auth/telegram
+     * Body: { initData } — raw Telegram Login Widget initData string
+     *
+     * Validates Telegram HMAC signature, finds or creates the user,
+     * and returns a JWT — same shape as email/password login.
+     */
+    public function loginWithTelegram(Request $request): JsonResponse
+    {
+        $initData = $request->input('initData');
+
+        if (!$initData || !is_string($initData)) {
+            return $this->error('initData is required.', 422);
+        }
+
+        $result = $this->auth->loginWithTelegram($initData);
+
+        if (isset($result['error'])) {
+            return $this->error($result['error'], 401);
+        }
+
+        return $this->ok($result, 'Login successful');
+    }
+
     // ══════════════════════════════════════════════════════════════
     // PROTECTED ROUTES (auth required)
     // ══════════════════════════════════════════════════════════════

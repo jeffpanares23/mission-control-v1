@@ -10,7 +10,7 @@ export function AccountsPage() {
 
   useEffect(() => {
     api.accounts.list()
-      .then(res => setAccounts(res.data))
+      .then(res => setAccounts(res))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])

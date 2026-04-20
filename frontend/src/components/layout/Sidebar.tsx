@@ -120,7 +120,7 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
             </div>
             <div style={{ overflow: 'hidden', flex: 1 }}>
               <p className="text-[12px] font-semibold leading-tight truncate" style={{ color: 'var(--color-text)' }}>{userName}</p>
-              <p className="text-[10px] capitalize" style={{ color: 'var(--color-text-3)' }}>{user?.profile?.role?.replace('_', ' ') || 'agent'}</p>
+              <p className="text-[10px] capitalize" style={{ color: 'var(--color-text-3)' }}>{user?.role?.replace('_', ' ') || 'agent'}</p>
             </div>
             <button
               onClick={logout}

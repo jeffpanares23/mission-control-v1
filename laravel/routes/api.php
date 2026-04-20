@@ -35,6 +35,7 @@ Route::prefix('v1')->group(function () {
     // ─── Public auth routes ────────────────────────────────────────
     Route::post('auth/login',    [AuthController::class, 'login']);
     Route::post('auth/register', [AuthController::class, 'register']);
+    Route::post('auth/telegram', [AuthController::class, 'loginWithTelegram']);
 
     // ─── Protected routes (Laravel JWT + agent DB routing) ─────────
     Route::middleware('agent.auth')->group(function () {

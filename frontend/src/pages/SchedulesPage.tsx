@@ -10,7 +10,7 @@ export function SchedulesPage() {
 
   useEffect(() => {
     api.schedules.list()
-      .then(res => setItems(res.data))
+      .then(res => setItems(res))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
