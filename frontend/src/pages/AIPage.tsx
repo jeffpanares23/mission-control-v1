@@ -10,11 +10,11 @@ export function AIPage() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
 
-  useState(() => {
+  useEffect(() => {
     api.ai.status()
-      .then(res => setAgent(res.data))
+      .then(res => setAgent(res as unknown as AIAgent))
       .catch(() => {})
-  })
+  }, [])
 
   const handleSend = async () => {
     if (!input.trim() || loading) return
@@ -25,7 +25,7 @@ export function AIPage() {
 
     try {
       const res = await api.ai.chat(input)
-      setMessages(prev => [...prev, { role: 'assistant', content: res.data.reply }])
+      setMessages(prev => [...prev, { role: 'assistant', content: res.reply }])
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error.' }])
     } finally {

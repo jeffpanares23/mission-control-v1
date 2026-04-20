@@ -14,8 +14,8 @@ export function AppShell() {
   useEffect(() => {
     api.dashboard.get()
       .then(res => {
-        setSummary(res.data)
-        setInsights(res.data.insights ?? [])
+        setSummary(res)
+        setInsights(res.insights ?? [])
       })
       .catch(() => { /* demo mode — UI stays graceful */ })
   }, [])
@@ -24,7 +24,7 @@ export function AppShell() {
   useEffect(() => {
     const sub = subscribeToTasks(() => {
       // Refresh dashboard stats on any task change
-      api.dashboard.get().then(res => setSummary(res.data)).catch(() => {})
+      api.dashboard.get().then(res => setSummary(res)).catch(() => {})
     })
     return () => { sub.unsubscribe() }
   }, [])
@@ -33,7 +33,7 @@ export function AppShell() {
   useEffect(() => {
     const sub = subscribeToSchedules(() => {
       // Child pages manage their own schedule state; just refresh dashboard
-      api.dashboard.get().then(res => setSummary(res.data)).catch(() => {})
+      api.dashboard.get().then(res => setSummary(res)).catch(() => {})
     })
     return () => { sub.unsubscribe() }
   }, [])

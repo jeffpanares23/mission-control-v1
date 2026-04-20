@@ -299,6 +299,212 @@ class AuthService
     }
 
     /**
+     * POST /api/v1/auth/telegram
+     *
+     * Validates Telegram initData and returns a signed JWT.
+     * If the telegram_user_id is not yet linked, creates a new account.
+     *
+     * Telegram initData format (URL-encoded):
+     *   query_id=xxx&user={"id":123,...}&auth_date=1234567890&hash=abc...
+     *
+     * Validation:
+     *   1. Parse initData URL params
+     *   2. Build data_check_string = sorted key=value\n pairs (excluding hash)
+     *   3. HMAC-SHA256(data_check_string, bot_token) == hash
+     *   4. Check auth_date is within 24 hours
+     *   5. Find or create user by telegram_user_id
+     *
+     * Returns: ['access_token', 'token_type' => 'Bearer', 'expires_in', 'user']
+     *          or ['error' => string]
+     */
+    public function loginWithTelegram(string $initData): array
+    {
+        // 1. Parse initData
+        parse_str($initData, $params);
+        if (!isset($params['hash'])) {
+            return ['error' => 'Invalid Telegram initData: missing hash.'];
+        }
+
+        $hash = $params['hash'];
+        unset($params['hash']);
+
+        // 2. Build data_check_string (sorted key=value, newline-separated)
+        ksort($params);
+        $dataCheckParts = [];
+        foreach ($params as $key => $value) {
+            $dataCheckParts[] = "{$key}={$value}";
+        }
+        $dataCheckString = implode("\n", $dataCheckParts);
+
+        // 3. Validate HMAC-SHA256 hash
+        $botToken = config('supabase.telegram_bot_token', env('TELEGRAM_BOT_TOKEN', ''));
+        if (empty($botToken)) {
+            return ['error' => 'Telegram bot token not configured.'];
+        }
+
+        $expectedHash = hash_hmac('sha256', $dataCheckString, $botToken);
+        if (!hash_equals($expectedHash, $hash)) {
+            return ['error' => 'Telegram authentication failed: invalid hash.'];
+        }
+
+        // 4. Check auth_date is within 24 hours
+        $authDate = intval($params['auth_date'] ?? 0);
+        if ($authDate <= 0 || (time() - $authDate) > 86400) {
+            return ['error' => 'Telegram authentication failed: initData expired or invalid auth_date.'];
+        }
+
+        // 5. Parse user JSON
+        $userJson = $params['user'] ?? null;
+        if (!$userJson) {
+            return ['error' => 'Invalid Telegram initData: missing user data.'];
+        }
+
+        $tgUser = json_decode($userJson, true);
+        if (!is_array($tgUser) || empty($tgUser['id'])) {
+            return ['error' => 'Invalid Telegram user data.'];
+        }
+
+        $telegramUserId = strval($tgUser['id']);
+        $telegramUsername = $tgUser['username'] ?? null;
+        $firstName = $tgUser['first_name'] ?? '';
+        $lastName = $tgUser['last_name'] ?? '';
+        $fullName = trim("{$firstName} {$lastName}") ?: $telegramUsername ?? 'Telegram User';
+
+        // 6. Find or create user by telegram_user_id
+        $existing = $this->supabase->get(
+            'users',
+            ['select' => '*', 'telegram_user_id' => "eq.{$telegramUserId}", 'limit' => 1],
+            $this->serviceRoleKey
+        );
+
+        $user = null;
+        if (is_array($existing) && count($existing) > 0) {
+            $user = $existing[0];
+        } else {
+            // Create new account
+            $result = $this->createTelegramUser($telegramUserId, $telegramUsername, $fullName);
+            if (isset($result['error'])) {
+                return $result;
+            }
+            $user = $result;
+        }
+
+        if (!$user || !($user['is_active'] ?? true)) {
+            return ['error' => 'Account is deactivated.'];
+        }
+
+        // 7. Get active agent
+        $agent = $this->getActiveAgent($user['id']);
+        if (!$agent) {
+            return ['error' => 'No agent access configured for this account. Contact super_admin.'];
+        }
+
+        // 8. Issue JWT
+        $token = $this->issueToken($user, $agent);
+
+        // 9. Store session
+        $this->storeSession($user['id'], $token);
+
+        return [
+            'access_token' => $token,
+            'token_type'   => 'Bearer',
+            'expires_in'   => 86400,
+            'user'         => $this->sanitisedUser($user, $agent),
+        ];
+    }
+
+    /**
+     * Create a new user account linked to a Telegram account.
+     */
+    private function createTelegramUser(string $telegramUserId, ?string $username, string $fullName): array
+    {
+        // Generate a placeholder password — user will never log in with it
+        $passwordHash = password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT, ['cost' => 12]);
+
+        // Generate email from telegram handle if available
+        $email = $username
+            ? "{$username}@telegram.mc"
+            : "telegram_{$telegramUserId}@telegram.mc";
+
+        // Check if email already exists (edge case: user registered with email first)
+        $existing = $this->supabase->get(
+            'users',
+            ['select' => 'id', 'email' => "eq.{$email}", 'limit' => 1],
+            $this->serviceRoleKey
+        );
+        if (is_array($existing) && count($existing) > 0) {
+            // Link telegram to existing account
+            $this->supabase->update(
+                'users',
+                ['email' => "eq.{$email}"],
+                ['telegram_user_id' => intval($telegramUserId)],
+                $this->serviceRoleKey
+            );
+            // Re-fetch
+            $existing = $this->supabase->get(
+                'users',
+                ['select' => '*', 'telegram_user_id' => "eq.{$telegramUserId}", 'limit' => 1],
+                $this->serviceRoleKey
+            );
+            return $existing[0] ?? ['error' => 'Failed to link Telegram account.'];
+        }
+
+        // Create new user
+        $inserted = $this->supabase->insert(
+            'users',
+            [
+                'email'             => $email,
+                'password_hash'     => $passwordHash,
+                'full_name'         => $fullName,
+                'role'              => 'agent',
+                'is_active'         => true,
+                'telegram_user_id'  => intval($telegramUserId),
+            ],
+            $this->serviceRoleKey
+        );
+
+        if (isset($inserted['error'])) {
+            return ['error' => 'Failed to create Telegram user: ' . ($inserted['error']['message'] ?? $inserted['error'])];
+        }
+
+        // Extract new user id
+        $newUser = is_array($inserted) ? ($inserted[0] ?? $inserted) : $inserted;
+        $userId = $newUser['id'] ?? null;
+        if (!$userId) {
+            return ['error' => 'Failed to retrieve new user ID after creation.'];
+        }
+
+        // Assign default agent (Patricia's if not specified)
+        $agents = $this->supabase->get(
+            'agents',
+            ['select' => 'id', 'slug' => 'eq.patricia', 'limit' => 1],
+            $this->serviceRoleKey
+        );
+        $agentId = is_array($agents) && count($agents) > 0 ? $agents[0]['id'] ?? null : null;
+
+        if ($agentId) {
+            $this->supabase->insert(
+                'user_agent_access',
+                [
+                    'user_id'   => $userId,
+                    'agent_id'  => $agentId,
+                    'is_active' => true,
+                ],
+                $this->serviceRoleKey
+            );
+        }
+
+        // Re-fetch full user
+        $fresh = $this->supabase->get(
+            'users',
+            ['select' => '*', 'id' => "eq.{$userId}", 'limit' => 1],
+            $this->serviceRoleKey
+        );
+
+        return is_array($fresh) && count($fresh) > 0 ? $fresh[0] : ['error' => 'Failed to fetch newly created user.'];
+    }
+
+    /**
      * Switch a user's active agent scope.
      */
     public function setActiveAgent(string $userId, string $agentId): array

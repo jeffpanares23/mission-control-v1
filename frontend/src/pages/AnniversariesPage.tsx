@@ -10,7 +10,7 @@ export function AnniversariesPage() {
 
   useEffect(() => {
     api.anniversaries.list()
-      .then(res => setItems(res.data))
+      .then(res => setItems(res))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])

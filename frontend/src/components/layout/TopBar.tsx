@@ -34,7 +34,7 @@ export function TopBar({ stats }: TopBarProps) {
 
   useEffect(() => {
     api.ai.status()
-      .then(r => setAgentStatus(r.data.status as AIAgentStatus))
+      .then(r => setAgentStatus(r.status as AIAgentStatus))
       .catch(() => setAgentStatus('offline'))
   }, [])
 

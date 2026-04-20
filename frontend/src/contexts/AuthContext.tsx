@@ -94,13 +94,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   // Load accessible agents list
-  const loadAgents = useCallback(async () => {
-    try {
-      const agentsData = await api.auth.agents()
-      setAgents(agentsData)
-    } catch {
-      setAgents([])
-    }
+  useEffect(() => {
+    api.auth.agents()
+      .then(agentsData => {
+        // Map backend agent shape to AuthAgent type
+        const mapped = agentsData.map(a => ({
+          id: a.agent_id,
+          slug: a.slug,
+          name: a.name,
+          supabase_url: '', // not exposed by backend; set on switch
+          is_active: a.is_active,
+        }))
+        setAgents(mapped)
+      })
+      .catch(() => setAgents([]))
   }, [])
 
   const login = useCallback(async (email: string, password: string) => {
@@ -132,7 +139,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
       const agentsData = await api.auth.agents()
-      setAgents(agentsData)
+      const mapped = agentsData.map(a => ({
+        id: a.agent_id,
+        slug: a.slug,
+        name: a.name,
+        supabase_url: '',
+        is_active: a.is_active,
+      }))
+      setAgents(mapped)
     } catch {
       // non-critical if agent fetch fails
     }
