@@ -1,33 +1,47 @@
-# Dependencies
-node_modules/
-vendor/
+# ========================
+# Laravel
+# ========================
+/laravel/vendor/
+/laravel/node_modules/
+/laravel/.env
+/laravel/.env.*
+/laravel/storage/*.key
 
-# Build outputs
-dist/
-build/
-.vercel/
-.next/
+/laravel/bootstrap/cache/
+/laravel/storage/
+/laravel/bootstrap/cache/*.php
+/laravel/storage/logs/*
+/laravel/storage/framework/cache/*
+/laravel/storage/framework/sessions/*
+/laravel/storage/framework/views/*
 
-# Environment (contain secrets)
-.env
-.env.local
-.env.*.local
+# ========================
+# Frontend (Vite/React)
+# ========================
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.env
+/frontend/.env.*
 
-# OS
+# ========================
+# System files
+# ========================
 .DS_Store
 Thumbs.db
 
-# IDE
-.idea/
-.vscode/
-*.swp
-
+# ========================
 # Logs
+# ========================
 *.log
-npm-debug.log*
 
-# Laravel
-/storage/*.key
-/bootstrap/cache/
-phpunit.result.cache
-.vercel
+# ========================
+# IDE / Editor
+# ========================
+.vscode/
+.idea/
+
+# ========================
+# OS
+# ========================
+*.swp
+*.swo
