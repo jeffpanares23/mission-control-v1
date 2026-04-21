@@ -7,6 +7,8 @@
 /laravel/.env.*
 /laravel/storage/*.key
 
+/laravel/bootstrap/cache/
+/laravel/storage/
 /laravel/bootstrap/cache/*.php
 /laravel/storage/logs/*
 /laravel/storage/framework/cache/*
