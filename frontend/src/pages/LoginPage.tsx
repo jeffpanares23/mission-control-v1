@@ -127,17 +127,19 @@ export default function LoginPage() {
 
       const json = await res.json()
 
-      if (!res.ok || !json.access_token) {
-        throw new Error(json.error?.message || 'Telegram authentication failed.')
+      // BaseApiController wraps response in { success, message, data }
+      const payload = json?.success === true && json?.data ? json.data : json
+      if (!res.ok || !payload.access_token) {
+        throw new Error(json?.error?.message || 'Telegram authentication failed.')
       }
 
-      const { access_token, user } = json
+      const { access_token, user, agent } = payload
 
       // Persist session (matching the shape AuthContext expects)
       localStorage.setItem('mc_session', JSON.stringify({
         access_token,
         user,
-        agent: null,
+        agent: agent ?? null,
       }))
 
       // Hard reload so AuthContext reinitializes from localStorage

@@ -65,28 +65,39 @@ async function get<T>(path: string): Promise<T> {
   const res = await request('GET', path)
   const json = await res.json()
   if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`)
-  return json
+  // BaseApiController::ok() wraps responses in { success, message, data }
+  if (json && json.success === true && 'data' in json) {
+    return json.data as T
+  }
+  return json as T
 }
 
 async function post<T = unknown>(path: string, data?: unknown): Promise<T> {
   const res = await request('POST', path, data)
   const json = await res.json()
   if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`)
-  return json
+  // BaseApiController::ok() wraps responses in { success, message, data }
+  // Unwrap so callers get the actual payload directly
+  if (json && json.success === true && 'data' in json) {
+    return json.data as T
+  }
+  return json as T
 }
 
 async function put<T = unknown>(path: string, data?: unknown): Promise<T> {
   const res = await request('PUT', path, data)
   const json = await res.json()
   if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`)
-  return json
+  if (json && json.success === true && 'data' in json) return json.data as T
+  return json as T
 }
 
 async function del<T = unknown>(path: string): Promise<T> {
   const res = await request('DELETE', path)
   const json = await res.json()
   if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`)
-  return json
+  if (json && json.success === true && 'data' in json) return json.data as T
+  return json as T
 }
 
 // ─── API object ───────────────────────────────────────────────
@@ -95,7 +106,7 @@ export const api = {
   // ─── Auth ──────────────────────────────────────────────────
   auth: {
     login: (email: string, password: string) =>
-      post<{ access_token: string; token_type: string; expires_in: number; user: AuthUser }>(
+      post<{ access_token: string; token_type: string; expires_in: number; user: AuthUser; agent: AuthAgent | null }>(
         '/auth/login', { email, password }
       ),
     register: (email: string, password: string, fullName: string) =>
