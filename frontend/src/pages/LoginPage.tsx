@@ -25,6 +25,18 @@ interface TelegramAuthData {
   hash: string
 }
 
+/** Returns true when Telegram Login Widget can safely run (HTTPS + non-IP host). */
+function isTelegramLoginAllowed(): boolean {
+  if (!TELEGRAM_BOT_USERNAME) return false
+  if (typeof window === 'undefined') return false
+  // Telegram widget requires HTTPS and a proper domain (not an IP address)
+  if (window.location.protocol !== 'https:') return false
+  const host = window.location.hostname
+  // Reject plain IPv4 addresses (e.g. 44.251.26.80)
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return false
+  return true
+}
+
 export default function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
@@ -34,12 +46,18 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [tgLoading, setTgLoading] = useState(false)
   const [tgError, setTgError] = useState('')
+  const [telegramAllowed, setTelegramAllowed] = useState(false)
   const tgButtonRef = useRef<HTMLDivElement>(null)
   const tgInitialized = useRef(false)
 
-  // Load Telegram Login Widget script once
+  // Determine if Telegram login can run (requires HTTPS + non-IP domain)
   useEffect(() => {
-    if (!TELEGRAM_BOT_USERNAME) return
+    setTelegramAllowed(isTelegramLoginAllowed())
+  }, [])
+
+  // Load Telegram Login Widget script once — only when allowed
+  useEffect(() => {
+    if (!telegramAllowed) return
     if (document.getElementById('telegram-login-widget-script')) {
       initTelegramButton()
       return
@@ -52,7 +70,7 @@ export default function LoginPage() {
     script.onload = () => initTelegramButton()
     document.head.appendChild(script)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [telegramAllowed])
 
   function initTelegramButton() {
     if (tgInitialized.current || !tgButtonRef.current) return
@@ -192,8 +210,8 @@ export default function LoginPage() {
             Sign in to your account
           </h2>
 
-          {/* Telegram Login Button */}
-          {TELEGRAM_BOT_USERNAME ? (
+          {/* Telegram Login Button — only shown when HTTPS + domain are available */}
+          {telegramAllowed ? (
             <div style={{ marginBottom: '1.5rem' }}>
               {/* Widget container — Telegram.Login.auth renders an iframe inside this div */}
               <div
@@ -244,13 +262,13 @@ export default function LoginPage() {
               fontSize: '0.75rem',
               textAlign: 'center',
             }}>
-              Telegram login not configured.<br/>
-              Set VITE_TELEGRAM_BOT_USERNAME in .env to enable.
+              Telegram login requires HTTPS + domain.<br/>
+              Available once domain + HTTPS is configured.
             </div>
           )}
 
           {/* Divider */}
-          {TELEGRAM_BOT_USERNAME && (
+          {telegramAllowed && (
             <div style={{
               display: 'flex',
               alignItems: 'center',
