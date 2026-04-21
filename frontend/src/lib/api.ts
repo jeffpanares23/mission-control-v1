@@ -8,6 +8,8 @@ import type {
   Account, Task, TaskStatus, Anniversary,
   Reminder, Schedule, Insight,
   ChannelConnection, DashboardSummary,
+  ChannelWithAgents, CronJob, KnowledgeFile,
+  AgentOpsDashboardSummary,
 } from '@/types'
 
 // ─── Auth types (Laravel JWT auth) ───────────────────────────
@@ -86,6 +88,14 @@ async function post<T = unknown>(path: string, data?: unknown): Promise<T> {
 
 async function put<T = unknown>(path: string, data?: unknown): Promise<T> {
   const res = await request('PUT', path, data)
+  const json = await res.json()
+  if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`)
+  if (json && json.success === true && 'data' in json) return json.data as T
+  return json as T
+}
+
+async function patch<T = unknown>(path: string, data?: unknown): Promise<T> {
+  const res = await request('PATCH', path, data)
   const json = await res.json()
   if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`)
   if (json && json.success === true && 'data' in json) return json.data as T
@@ -251,6 +261,47 @@ export const api = {
     list: () => get('/agent-statuses'),
     heartbeat: (agentName: string, status: string) =>
       post('/agent-statuses/heartbeat', { agent_name: agentName, status }),
+  },
+
+  // ─── Agent Operations Dashboard ──────────────────────────────
+  agentOps: {
+    dashboard: () => get<AgentOpsDashboardSummary>('/agent-ops/dashboard'),
+
+    // Channels
+    channels: {
+      list: () => get<ChannelWithAgents[]>('/agent-ops/channels'),
+      details: (id: string) => get<ChannelWithAgents>(`/agent-ops/channels/${id}`),
+      pauseAgent: (channelId: string) =>
+        post(`/agent-ops/channels/${channelId}/pause-agent`),
+      resumeAgent: (channelId: string) =>
+        post(`/agent-ops/channels/${channelId}/resume-agent`),
+      reconnect: (channelId: string) =>
+        post(`/agent-ops/channels/${channelId}/reconnect`),
+    },
+
+    // Cron Jobs
+    cronJobs: {
+      list: (params?: { status?: string; channel_id?: string }) => {
+        const qs = params ? '?' + new URLSearchParams(params).toString() : ''
+        return get<CronJob[]>(`/agent-ops/cron-jobs${qs}`)
+      },
+      run: (id: string) =>
+        post(`/agent-ops/cron-jobs/${id}/run`),
+      pause: (id: string) =>
+        post(`/agent-ops/cron-jobs/${id}/pause`),
+      resume: (id: string) =>
+        post(`/agent-ops/cron-jobs/${id}/resume`),
+    },
+
+    // Knowledge Files
+    knowledgeFiles: {
+      list: (params?: { channel_id?: string; status?: string }) => {
+        const qs = params ? '?' + new URLSearchParams(params).toString() : ''
+        return get<KnowledgeFile[]>(`/agent-ops/knowledge-files${qs}`)
+      },
+      toggle: (id: string, enabled: boolean) =>
+        patch(`/agent-ops/knowledge-files/${id}`, { is_enabled: enabled }),
+    },
   },
 
   // ─── Cron Logs ──────────────────────────────────────────────

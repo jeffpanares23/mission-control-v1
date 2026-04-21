@@ -9,7 +9,7 @@ export type ReminderRecurrence = 'once' | 'daily' | 'weekly' | 'monthly' | 'year
 export type InsightType = 'task_overdue' | 'upcoming_anniversary' | 'schedule_conflict' | 'ai_suggestion' | 'productivity_tip' | 'channel_alert';
 export type AIAgentStatus = 'idle' | 'thinking' | 'acting' | 'error' | 'offline';
 
-// ─── Account ────────────────────────────────────────────────
+// ─── Account ───────────────────────────────────────────────
 export interface Account {
   id: string;
   name: string;
@@ -27,7 +27,7 @@ export interface Account {
   updated_at: string;
 }
 
-// ─── Task ────────────────────────────────────────────────────
+// ─── Task ───────────────────────────────────────────────────
 export interface Task {
   id: string;
   title: string;
@@ -44,6 +44,12 @@ export interface Task {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  // Agent ops extensions
+  channel_id?: string;
+  channel_name?: string;
+  agent_id?: string;
+  agent_name?: string;
+  trigger_source?: 'cron' | 'manual' | 'channel' | 'system';
 }
 
 // ─── Kanban Column ──────────────────────────────────────────
@@ -69,7 +75,7 @@ export interface Anniversary {
   updated_at: string;
 }
 
-// ─── Reminder ───────────────────────────────────────────────
+// ─── Reminder ──────────────────────────────────────────────
 export interface Reminder {
   id: string;
   title: string;
@@ -86,7 +92,7 @@ export interface Reminder {
   updated_at: string;
 }
 
-// ─── Schedule ───────────────────────────────────────────────
+// ─── Schedule ──────────────────────────────────────────────
 export interface Schedule {
   id: string;
   title: string;
@@ -103,7 +109,7 @@ export interface Schedule {
   updated_at: string;
 }
 
-// ─── Insight ────────────────────────────────────────────────
+// ─── Insight ───────────────────────────────────────────────
 export interface Insight {
   id: string;
   insight_type: InsightType;
@@ -197,4 +203,161 @@ export interface AppSettings {
   theme: ThemeSettings;
   notifications: NotificationSettings;
   workspace: WorkspaceSettings;
+}
+
+// ══════════════════════════════════════════════════════════════
+// AGENT OPERATIONS DASHBOARD — TYPES
+// ══════════════════════════════════════════════════════════════
+
+// ─── Managed Agent ─────────────────────────────────────────
+export interface ManagedAgent {
+  id: string;
+  name: string;
+  slug: string;
+  status: AIAgentStatus;
+  model: string;
+  channel_count: number;
+  active_channel_count: number;
+  task_count: number;
+  active_task_count: number;
+  is_active: boolean;
+  supabase_url?: string;
+  supabase_key_masked?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ─── Agent ↔ Channel Assignment ────────────────────────────
+export interface AgentChannelAssignment {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  agent_status: AIAgentStatus;
+  channel_id: string;
+  channel_name: string;
+  channel_type: ChannelType;
+  is_primary: boolean;
+  is_active: boolean;
+  assigned_at: string;
+  tasks_count: number;
+}
+
+// ─── Channel with Agent Info (extended) ────────────────────
+export interface ChannelWithAgents extends ChannelConnection {
+  assigned_agents: AgentChannelAssignment[];
+  pending_task_count: number;
+  last_activity_at?: string;
+  cron_jobs_count: number;
+}
+
+// ─── Cron Job ─────────────────────────────────────────────
+export type CronJobStatus = 'active' | 'paused' | 'running' | 'failed' | 'idle';
+export type CronTriggerType = 'schedule' | 'manual' | 'event';
+
+export interface CronJob {
+  id: string;
+  name: string;
+  description?: string;
+  cron_expression?: string;
+  schedule?: string;
+  trigger_type: CronTriggerType;
+  channel_id?: string;
+  channel_name?: string;
+  agent_id?: string;
+  agent_name?: string;
+  is_active: boolean;
+  status: CronJobStatus;
+  last_run_at?: string;
+  last_run_duration_ms?: number;
+  last_run_result?: 'success' | 'failed' | 'partial';
+  last_run_error?: string;
+  next_run_at?: string;
+  run_count: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+// ─── Knowledge / Markdown File ─────────────────────────────
+export type KnowledgeFileStatus = 'active' | 'archived' | 'disabled';
+
+export interface KnowledgeFile {
+  id: string;
+  filename: string;
+  title?: string;
+  path: string;
+  file_size_bytes?: number;
+  file_type: 'markdown' | 'text' | 'json' | 'yaml';
+  tags: string[];
+  channel_id?: string;
+  channel_name?: string;
+  agent_id?: string;
+  agent_name?: string;
+  is_enabled: boolean;
+  status: KnowledgeFileStatus;
+  instruction_weight?: number;
+  last_modified_at?: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+// ─── Operational Insight ───────────────────────────────────
+export type OperationalInsightSeverity = 'info' | 'warning' | 'critical';
+
+export type OperationalInsightType =
+  | 'failed_cron'
+  | 'disconnected_channel'
+  | 'unassigned_channel'
+  | 'stale_knowledge_file'
+  | 'overloaded_agent'
+  | 'blocked_task'
+  | 'agent_offline'
+  | 'high_error_rate';
+
+// OperationalInsight is structurally compatible with Insight —
+// used for the agent-ops operational alerts panel.
+export interface OperationalInsight {
+  id: string;
+  insight_type: OperationalInsightType;
+  title: string;
+  message: string;
+  severity: OperationalInsightSeverity;
+  is_read: boolean;
+  is_dismissed: boolean;
+  action_url?: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  // Extra fields (not in core Insight but populated by agent-ops)
+  entity_type?: 'channel' | 'agent' | 'cron' | 'task' | 'file';
+  entity_id?: string;
+  entity_name?: string;
+}
+
+// ─── Agent Ops Metrics ─────────────────────────────────────
+export interface AgentOpsMetrics {
+  total_channels: number;
+  active_channels: number;
+  inactive_channels: number;
+  total_agents: number;
+  active_agents: number;
+  total_cron_jobs: number;
+  running_cron_jobs: number;
+  failed_cron_jobs: number;
+  paused_cron_jobs: number;
+  pending_tasks: number;
+  in_progress_tasks: number;
+  done_tasks: number;
+  blocked_tasks: number;
+  knowledge_files: number;
+  active_knowledge_files: number;
+  alerts_count: number;
+}
+
+// ─── Agent Ops Dashboard Summary ────────────────────────────
+export interface AgentOpsDashboardSummary {
+  metrics: AgentOpsMetrics;
+  channels: ChannelWithAgents[];
+  recent_tasks: Task[];
+  active_insights: OperationalInsight[];
 }

@@ -1,14 +1,23 @@
-import { X, AlertTriangle, Lightbulb, TrendingUp, Sparkles } from 'lucide-react'
+import { X, AlertTriangle, Lightbulb, TrendingUp, Sparkles, AlertOctagon, WifiOff, Bot, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Insight } from '@/types'
 
 const typeConfig: Record<string, { icon: typeof AlertTriangle; color: string; bg: string }> = {
-  task_overdue:     { icon: AlertTriangle, color: 'var(--color-error)',  bg: 'rgba(239,68,68,0.1)' },
-  upcoming_anniversary: { icon: Sparkles,   color: 'var(--color-accent)', bg: 'var(--color-accent-dim)' },
-  schedule_conflict:{ icon: AlertTriangle, color: 'var(--color-warning)',bg: 'rgba(234,179,8,0.1)' },
-  ai_suggestion:    { icon: Lightbulb,    color: 'var(--color-accent)', bg: 'var(--color-accent-dim)' },
-  productivity_tip: { icon: TrendingUp,   color: 'var(--color-info)',   bg: 'rgba(59,130,246,0.1)' },
-  channel_alert:    { icon: AlertTriangle, color: 'var(--color-error)', bg: 'rgba(239,68,68,0.1)' },
+  task_overdue:         { icon: AlertTriangle, color: 'var(--color-error)',   bg: 'rgba(239,68,68,0.1)' },
+  upcoming_anniversary: { icon: Sparkles,      color: 'var(--color-accent)',   bg: 'var(--color-accent-dim)' },
+  schedule_conflict:    { icon: AlertTriangle, color: 'var(--color-warning)',  bg: 'rgba(234,179,8,0.1)' },
+  ai_suggestion:        { icon: Lightbulb,     color: 'var(--color-accent)',   bg: 'var(--color-accent-dim)' },
+  productivity_tip:     { icon: TrendingUp,   color: 'var(--color-info)',      bg: 'rgba(59,130,246,0.1)' },
+  channel_alert:        { icon: AlertTriangle, color: 'var(--color-error)',    bg: 'rgba(239,68,68,0.1)' },
+  // ── Operational insight types (agent-ops) ──────────────────────
+  failed_cron:           { icon: Clock,       color: 'var(--color-error)',   bg: 'rgba(239,68,68,0.1)' },
+  disconnected_channel:  { icon: WifiOff,     color: 'var(--color-error)',   bg: 'rgba(239,68,68,0.1)' },
+  unassigned_channel:    { icon: Bot,         color: 'var(--color-warning)', bg: 'rgba(234,179,8,0.1)' },
+  stale_knowledge_file:  { icon: AlertOctagon, color: 'var(--color-info)',   bg: 'rgba(59,130,246,0.1)' },
+  overloaded_agent:      { icon: Bot,         color: 'var(--color-warning)', bg: 'rgba(234,179,8,0.1)' },
+  blocked_task:          { icon: AlertTriangle, color: 'var(--color-error)', bg: 'rgba(239,68,68,0.1)' },
+  agent_offline:         { icon: WifiOff,     color: 'var(--color-error)',   bg: 'rgba(239,68,68,0.1)' },
+  high_error_rate:       { icon: AlertOctagon, color: 'var(--color-error)',  bg: 'rgba(239,68,68,0.1)' },
 }
 
 interface RightPanelProps {

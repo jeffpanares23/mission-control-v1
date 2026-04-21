@@ -14,11 +14,12 @@ use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\AgentOpsController;
 
 /*
-|--------------------------------------------------------------------------
-| API Routes — Mission Control V1
-|--------------------------------------------------------------------------
+||--------------------------------------------------------------------------
+|| API Routes — Mission Control V1
+||--------------------------------------------------------------------------
 */
 
 // ─── Public health check ────────────────────────────────────
@@ -96,5 +97,19 @@ Route::prefix('v1')->group(function () {
 
         // ─── Activity Log ──────────────────────────────────────────
         Route::get('activity', [DashboardController::class, 'activity']);
+
+        // ─── Agent Operations Dashboard ───────────────────────────
+        Route::get('agent-ops/dashboard',                        [AgentOpsController::class, 'dashboard']);
+        Route::get('agent-ops/channels',                         [AgentOpsController::class, 'channels']);
+        Route::get('agent-ops/channels/{id}',                    [AgentOpsController::class, 'channelDetail']);
+        Route::post('agent-ops/channels/{id}/pause-agent',       [AgentOpsController::class, 'pauseChannelAgent']);
+        Route::post('agent-ops/channels/{id}/resume-agent',      [AgentOpsController::class, 'resumeChannelAgent']);
+        Route::post('agent-ops/channels/{id}/reconnect',         [AgentOpsController::class, 'reconnectChannel']);
+        Route::get('agent-ops/cron-jobs',                        [AgentOpsController::class, 'cronJobs']);
+        Route::post('agent-ops/cron-jobs/{id}/run',              [AgentOpsController::class, 'runCronJob']);
+        Route::post('agent-ops/cron-jobs/{id}/pause',            [AgentOpsController::class, 'pauseCronJob']);
+        Route::post('agent-ops/cron-jobs/{id}/resume',           [AgentOpsController::class, 'resumeCronJob']);
+        Route::get('agent-ops/knowledge-files',                  [AgentOpsController::class, 'knowledgeFiles']);
+        Route::patch('agent-ops/knowledge-files/{id}',           [AgentOpsController::class, 'updateKnowledgeFile']);
     });
 });
