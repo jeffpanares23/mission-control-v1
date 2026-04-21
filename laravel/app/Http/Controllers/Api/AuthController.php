@@ -9,10 +9,13 @@ use Illuminate\Http\Request;
 
 class AuthController extends BaseApiController
 {
-    public function __construct(
-        private AuthService $auth,
-        private SupabaseService $supabase
-    ) {}
+    protected AuthService $auth;
+
+    public function __construct(AuthService $auth, SupabaseService $supabase)
+    {
+        $this->auth = $auth;
+        $this->supabase = $supabase;
+    }
 
     // ══════════════════════════════════════════════════════════════
     // PUBLIC ROUTES (no auth required)
