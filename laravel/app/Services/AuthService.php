@@ -58,7 +58,10 @@ class AuthService
             return ['error' => 'Invalid email or password.'];
         }
 
-        $user = $users[0];
+        $user = $users[0] ?? null;
+        if (!is_array($user)) {
+            return ['error' => 'Invalid email or password.'];
+        }
 
         if (!($user['is_active'] ?? true)) {
             return ['error' => 'Account is deactivated.'];
@@ -596,15 +599,17 @@ class AuthService
                 ],
                 $this->serviceRoleKey
             );
-            if (!is_array($access) || count($access) === 0) return null;
+            if (!is_array($access) || count($access) === 0 || !isset($access[0])) return null;
+            $agentId = $access[0]['agent_id'] ?? null;
+            if (!$agentId) return null;
             $agents = $this->supabase->get(
                 'agents',
-                ['select' => '*', 'id' => "eq.{$access[0]['agent_id']}", 'is_active' => 'eq.true', 'limit' => 1],
+                ['select' => '*', 'id' => "eq.{$agentId}", 'is_active' => 'eq.true', 'limit' => 1],
                 $this->serviceRoleKey
             );
-            return is_array($agents) && count($agents) > 0 ? $agents[0] : null;
+            return is_array($agents) && isset($agents[0]) ? $agents[0] : null;
         }
-        return is_array($result) && count($result) > 0 ? $result[0] : null;
+        return is_array($result) && isset($result[0]) ? $result[0] : null;
     }
 
     private function sanitisedUser(array $user, ?array $agent): array
