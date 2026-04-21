@@ -72,13 +72,10 @@ class AuthService
             return ['error' => 'Invalid email or password.'];
         }
 
-        // 3. Get user's active agent
+        // 3. Get user's active agent (null if none assigned — relaxed for admin/testing)
         $agent = $this->getActiveAgent($user['id']);
-        if (!$agent) {
-            return ['error' => 'No agent access configured for this account. Contact super_admin.'];
-        }
 
-        // 4. Issue JWT
+        // 4. Issue JWT (agent may be null)
         $token = $this->issueToken($user, $agent);
 
         // 5. Store session
@@ -90,6 +87,7 @@ class AuthService
             'token_type'   => 'Bearer',
             'expires_in'   => 86400, // 24 hours
             'user'         => $this->sanitisedUser($user, $agent),
+            'agent'        => $agent,
         ];
     }
 
@@ -396,13 +394,10 @@ class AuthService
             return ['error' => 'Account is deactivated.'];
         }
 
-        // 7. Get active agent
+        // 7. Get active agent (null if none assigned — relaxed for admin/testing)
         $agent = $this->getActiveAgent($user['id']);
-        if (!$agent) {
-            return ['error' => 'No agent access configured for this account. Contact super_admin.'];
-        }
 
-        // 8. Issue JWT
+        // 8. Issue JWT (agent may be null)
         $token = $this->issueToken($user, $agent);
 
         // 9. Store session
@@ -413,6 +408,7 @@ class AuthService
             'token_type'   => 'Bearer',
             'expires_in'   => 86400,
             'user'         => $this->sanitisedUser($user, $agent),
+            'agent'        => $agent,
         ];
     }
 
@@ -533,7 +529,7 @@ class AuthService
     // PRIVATE HELPERS
     // ══════════════════════════════════════════════════════════════
 
-    private function issueToken(array $user, array $agent): string
+    private function issueToken(array $user, ?array $agent): string
     {
         $header  = $this->base64UrlEncode(json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
         $payload = $this->base64UrlEncode(json_encode([
