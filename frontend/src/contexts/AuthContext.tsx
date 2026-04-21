@@ -53,6 +53,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshMe = useCallback(async () => {
     try {
       const data = await api.auth.me()
+      // Defensive: guard against malformed response
+      if (!data?.user?.id) throw new Error('Invalid user context from /auth/me')
       const freshUser: AuthUser = {
         id: data.user.id,
         email: data.user.email,
@@ -113,7 +115,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const res = await api.auth.login(email, password)
 
-    // The response: { access_token, token_type, expires_in, user }
+    // The response: { access_token, token_type, expires_in, user, agent }
+    if (!res?.user?.id) throw new Error('Invalid login response: missing user')
+
     const newUser: AuthUser = {
       id: res.user.id,
       email: res.user.email,
@@ -125,19 +129,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       agent_name: res.user.agent_name,
     }
 
-    // Fetch full agent context
-    let newAgent: AuthAgent | null = null
+    // Use the agent from login response directly (avoids extra /auth/me call)
+    const newAgent: AuthAgent | null = res.agent ? {
+      id: res.agent.id,
+      slug: res.agent.slug,
+      name: res.agent.name,
+      supabase_url: res.agent.supabase_url,
+      is_active: res.agent.is_active,
+    } : null
+
+    // Fetch accessible agents list (non-critical)
     try {
-      const me = await api.auth.me()
-      if (me.agent) {
-        newAgent = {
-          id: me.agent.id,
-          slug: me.agent.slug,
-          name: me.agent.name,
-          supabase_url: me.agent.supabase_url,
-          is_active: me.agent.is_active,
-        }
-      }
       const agentsData = await api.auth.agents()
       const mapped = agentsData.map(a => ({
         id: a.agent_id,
@@ -148,7 +150,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }))
       setAgents(mapped)
     } catch {
-      // non-critical if agent fetch fails
+      // non-critical if agents list fetch fails
     }
 
     localStorage.setItem('mc_session', JSON.stringify({
