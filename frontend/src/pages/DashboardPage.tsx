@@ -64,7 +64,7 @@ export function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [view, setView] = useState<'kanban' | 'list'>('kanban')
   const [loading, setLoading] = useState(true)
-  const [rightTab, setRightTab] = useState<'cron' | 'files'>('cron')
+  const [rightTab, setRightTab] = useState<'cron' | 'files' | 'insights'>('insights')
 
   useEffect(() => {
     Promise.all([
@@ -429,7 +429,7 @@ function ChannelsSkeleton() {
 
 function KanbanBoard({ tasks, view, loading }: { tasks: Task[]; view: 'kanban' | 'list'; loading: boolean }) {
   const byColumn = TASK_COLUMNS.reduce((acc, col) => {
-    acc[col.id] = tasks.filter(t => t.column_status === col.id || t.status === col.status)
+    acc[col.id] = tasks.filter(t => t.status === col.status)
     return acc
   }, {} as Record<string, Task[]>)
 
@@ -587,14 +587,278 @@ function TaskListView({ tasks }: { tasks: Task[] }) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// RIGHT OPS PANEL — Cron Monitor + Knowledge Files
+// AI INSIGHTS PANEL — Operational Alerts
+// ══════════════════════════════════════════════════════════════
+
+interface InsightItem {
+  severity: 'critical' | 'warning' | 'info'
+  title: string
+  description: string
+  meta?: string
+  cta?: { label: string; onClick: () => void }
+}
+
+function InsightsPanel() {
+  const [loading, setLoading] = useState(true)
+  const [opsData, setOpsData] = useState<AgentOpsDashboardSummary | null>(null)
+  const [cronJobs, setCronJobs] = useState<CronJob[]>([])
+  const [knowledgeFiles, setKnowledgeFiles] = useState<KnowledgeFile[]>([])
+  const [channels, setChannels] = useState<ChannelWithAgents[]>([])
+
+  useEffect(() => {
+    Promise.all([
+      api.agentOps.dashboard().catch(() => null),
+      api.agentOps.cronJobs.list().catch(() => []),
+      api.agentOps.knowledgeFiles.list().catch(() => []),
+    ]).then(([ops, crons, files]) => {
+      if (ops) {
+        setOpsData(ops)
+        setChannels(ops.channels ?? [])
+      }
+      if (crons) setCronJobs(crons)
+      if (files) setKnowledgeFiles(files)
+      setLoading(false)
+    })
+  }, [])
+
+  // ── Derive insights ─────────────────────────────────────────
+  const insights: InsightItem[] = []
+
+  if (!loading) {
+    // 1. Disconnected / inactive channels
+    const disconnected = channels.filter(ch => !ch.is_active)
+    if (disconnected.length > 0) {
+      disconnected.forEach(ch => {
+        insights.push({
+          severity: 'critical',
+          title: `Channel offline: ${ch.channel_name ?? ch.channel}`,
+          description: 'Channel connection is inactive. Check webhook/token configuration.',
+          meta: ch.channel,
+          cta: { label: 'Reconnect', onClick: () => api.agentOps.channels.reconnect(ch.id).catch(() => {}) },
+        })
+      })
+    }
+
+    // 2. Failed cron jobs
+    const failedCrons = cronJobs.filter(j => j.status === 'failed' || j.last_run_result === 'failed')
+    if (failedCrons.length > 0) {
+      failedCrons.forEach(j => {
+        insights.push({
+          severity: 'critical',
+          title: `Cron failed: ${j.name}`,
+          description: j.last_run_error ?? 'Last run returned a failure result.',
+          meta: j.schedule ?? j.cron_expression ?? '',
+          cta: { label: 'Retry', onClick: () => api.agentOps.cronJobs.run(j.id).catch(() => {}) },
+        })
+      })
+    }
+
+    // 3. Channels with no assigned agent
+    const noAgentChannels = channels.filter(ch => ch.is_active && ch.assigned_agents.length === 0)
+    if (noAgentChannels.length > 0) {
+      noAgentChannels.forEach(ch => {
+        insights.push({
+          severity: 'warning',
+          title: `No agent assigned: ${ch.channel_name ?? ch.channel}`,
+          description: 'This channel is active but has no AI agent handling events.',
+          meta: ch.channel,
+        })
+      })
+    }
+
+    // 4. Paused cron jobs (warnings)
+    const pausedCrons = cronJobs.filter(j => j.status === 'paused')
+    if (pausedCrons.length > 0) {
+      pausedCrons.forEach(j => {
+        insights.push({
+          severity: 'warning',
+          title: `Cron paused: ${j.name}`,
+          description: 'Scheduled job is paused and not running.',
+          meta: j.schedule ?? j.cron_expression ?? '',
+          cta: { label: 'Resume', onClick: () => api.agentOps.cronJobs.resume(j.id).catch(() => {}) },
+        })
+      })
+    }
+
+    // 5. Stale knowledge files (> 30 days since last modified)
+    const staleCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    const staleFiles = knowledgeFiles.filter(f =>
+      f.is_enabled && f.last_modified_at && new Date(f.last_modified_at) < staleCutoff
+    )
+    if (staleFiles.length > 0) {
+      staleFiles.forEach(f => {
+        const days = Math.floor((Date.now() - new Date(f.last_modified_at!).getTime()) / 86400000)
+        insights.push({
+          severity: 'info',
+          title: `Stale file: ${f.title ?? f.filename}`,
+          description: `Not updated in ${days} days. Agent context may be outdated.`,
+          meta: f.file_type,
+          cta: { label: 'Refresh', onClick: () => {} },
+        })
+      })
+    }
+
+    // 6. Overloaded agents (> 15 tasks)
+    const agentTaskMap = new Map<string, { name: string; count: number; channel: string }>()
+    channels.forEach(ch => {
+      ch.assigned_agents.forEach(ag => {
+        const existing = agentTaskMap.get(ag.agent_id)
+        if (existing) {
+          existing.count += ag.tasks_count
+        } else {
+          agentTaskMap.set(ag.agent_id, { name: ag.agent_name, count: ag.tasks_count, channel: ch.channel_name ?? ch.channel })
+        }
+      })
+    })
+    agentTaskMap.forEach(({ name, count, channel }) => {
+      if (count > 15) {
+        insights.push({
+          severity: 'warning',
+          title: `Agent overloaded: ${name}`,
+          description: `${count} tasks assigned. Consider redistributing load.`,
+          meta: channel,
+        })
+      }
+    })
+
+    // 7. Blocked tasks
+    const blockedTasks = opsData?.metrics?.blocked_tasks ?? 0
+    if (blockedTasks > 0) {
+      insights.push({
+        severity: 'critical',
+        title: `${blockedTasks} blocked task${blockedTasks > 1 ? 's' : ''}`,
+        description: 'Tasks are waiting on external input and cannot progress.',
+        meta: 'tasks',
+      })
+    }
+  }
+
+  const criticalCount = insights.filter(i => i.severity === 'critical').length
+  const warningCount  = insights.filter(i => i.severity === 'warning').length
+  const infoCount     = insights.filter(i => i.severity === 'info').length
+
+  if (loading) {
+    return (
+      <div style={{ padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {[1, 2, 3, 4].map(i => (
+          <div key={i} style={{ height: '64px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)', animation: 'pulse 2s infinite' }} />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ padding: '10px' }}>
+
+      {/* Summary header */}
+      {insights.length > 0 ? (
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '10px', flexWrap: 'wrap' }}>
+          {criticalCount > 0 && <InsightBadge count={criticalCount} color="#ef4444" label="Critical" />}
+          {warningCount > 0  && <InsightBadge count={warningCount}  color="#f59e0b" label="Warning"  />}
+          {infoCount > 0     && <InsightBadge count={infoCount}     color="#3b82f6" label="Info"      />}
+        </div>
+      ) : (
+        <div style={{
+          padding: '16px 12px', marginBottom: '10px',
+          background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)',
+          borderRadius: '8px', textAlign: 'center',
+        }}>
+          <CheckCircle2 className="w-6 h-6" style={{ color: '#10b981', margin: '0 auto 6px' }} />
+          <p style={{ fontSize: '12px', fontWeight: 600, color: '#10b981' }}>All systems operational</p>
+          <p style={{ fontSize: '10px', color: 'rgba(16,185,129,0.7)', marginTop: '2px' }}>No alerts detected</p>
+        </div>
+      )}
+
+      {/* Insight list */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+        {insights.map((insight, i) => (
+          <InsightCard key={i} insight={insight} />
+        ))}
+        {insights.length === 0 && (
+          <p style={{ textAlign: 'center', padding: '20px', fontSize: '12px', color: 'var(--color-text-3)' }}>
+            No insights to display
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function InsightBadge({ count, color, label }: { count: number; color: string; label: string }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '5px',
+      padding: '4px 8px',
+      background: `${color}15`, border: `1px solid ${color}35`,
+      borderRadius: '6px',
+    }}>
+      <span style={{ fontSize: '12px', fontWeight: 700, color }}>{count}</span>
+      <span style={{ fontSize: '10px', color: 'var(--color-text-3)' }}>{label}</span>
+    </div>
+  )
+}
+
+function InsightCard({ insight }: { insight: InsightItem }) {
+  const severityColors = {
+    critical: { bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.3)', text: '#ef4444', dot: '#ef4444' },
+    warning:  { bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.3)', text: '#f59e0b', dot: '#f59e0b' },
+    info:     { bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.3)', text: '#60a5fa', dot: '#60a5fa' },
+  }
+  const c = severityColors[insight.severity]
+
+  return (
+    <div style={{
+      padding: '9px 11px',
+      background: c.bg,
+      border: `1px solid ${c.border}`,
+      borderRadius: '8px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+        <div style={{
+          width: '7px', height: '7px', borderRadius: '50%', background: c.dot,
+          flexShrink: 0, marginTop: '4px',
+        }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontSize: '11px', fontWeight: 600, color: c.text, marginBottom: '3px' }}>
+            {insight.title}
+          </p>
+          <p style={{ fontSize: '10px', color: 'var(--color-text-2)', lineHeight: 1.4 }}>
+            {insight.description}
+          </p>
+          {insight.meta && (
+            <p style={{ fontSize: '9px', color: 'var(--color-text-3)', marginTop: '3px' }}>
+              {insight.meta}
+            </p>
+          )}
+        </div>
+      </div>
+      {insight.cta && (
+        <div style={{ marginTop: '7px', display: 'flex', gap: '5px' }}>
+          <button
+            onClick={insight.cta.onClick}
+            style={{
+              padding: '3px 8px', fontSize: '10px', fontWeight: 600,
+              background: `${c.text}15`, border: `1px solid ${c.text}35`,
+              borderRadius: '5px', cursor: 'pointer', color: c.text,
+            }}
+          >
+            {insight.cta.label}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════
+// RIGHT OPS PANEL — Cron Monitor + Knowledge Files + AI Insights
 // ══════════════════════════════════════════════════════════════
 
 function RightOpsPanel({
   rightTab, setRightTab,
 }: {
-  rightTab: 'cron' | 'files'
-  setRightTab: (t: 'cron' | 'files') => void
+  rightTab: 'cron' | 'files' | 'insights'
+  setRightTab: (t: 'cron' | 'files' | 'insights') => void
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -603,13 +867,16 @@ function RightOpsPanel({
         display: 'flex', borderBottom: '1px solid var(--color-border)',
         flexShrink: 0, padding: '0 4px',
       }}>
-        <TabBtn active={rightTab === 'cron'} onClick={() => setRightTab('cron')} icon={<Clock className="w-[11px] h-[11px]" />} label="Cron Monitor" />
-        <TabBtn active={rightTab === 'files'} onClick={() => setRightTab('files')} icon={<BookOpen className="w-[11px] h-[11px]" />} label="Knowledge" />
+        <TabBtn active={rightTab === 'insights'} onClick={() => setRightTab('insights')} icon={<AlertTriangle className="w-[11px] h-[11px]" />} label="AI Insights" />
+        <TabBtn active={rightTab === 'cron'} onClick={() => setRightTab('cron')} icon={<Clock className="w-[11px] h-[11px]" />} label="Cron" />
+        <TabBtn active={rightTab === 'files'} onClick={() => setRightTab('files')} icon={<BookOpen className="w-[11px] h-[11px]" />} label="Files" />
       </div>
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {rightTab === 'cron'
+        {rightTab === 'insights'
+          ? <InsightsPanel />
+          : rightTab === 'cron'
           ? <CronMonitor />
           : <KnowledgePanel />
         }
