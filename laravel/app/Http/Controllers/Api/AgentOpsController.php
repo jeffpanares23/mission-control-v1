@@ -321,8 +321,213 @@ class AgentOpsController extends Controller
     }
 
     // ══════════════════════════════════════════════════════════════
+    // TELEGRAM POLLING
+    // ══════════════════════════════════════════════════════════════
+
+    /**
+     * GET /api/v1/agent-ops/polling
+     * Returns aggregated Telegram polling overview from real DB data
+     * alongside mock session/agent breakdown.
+     */
+    public function pollingOverview(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $user = $request->attributes->get('user');
+        $userId = $user['id'] ?? null;
+
+        if (!$userId) {
+            return $this->ok($this->mockPollingData(), 'Polling overview (mock)');
+        }
+
+        // Attempt real data load; fall back to mock on failure
+        try {
+            $telegramChannels = $this->fetchTelegramPollingData($userId);
+            if (!empty($telegramChannels)) {
+                return $this->ok($telegramChannels, 'Polling overview');
+            }
+        } catch (\Throwable $e) {
+            // Fall through to mock
+        }
+
+        return $this->ok($this->mockPollingData(), 'Polling overview (mock)');
+    }
+
+    /**
+     * GET /api/v1/agent-ops/polling/{channelConnectionId}
+     * Per-channel polling detail.
+     */
+    public function pollingDetail(Request $request, string $channelConnectionId): \Illuminate\Http\JsonResponse
+    {
+        $user = $request->attributes->get('user');
+
+        $config = $this->db($request)->get('telegram_bot_configs', [
+            'channel_connection_id' => "eq.{$channelConnectionId}",
+        ]);
+
+        $sessions = [];
+        if (!empty($config) && is_array($config[0] ?? null)) {
+            $sessions = $this->db($request)->get('telegram_polling_sessions', [
+                'telegram_bot_config_id' => "eq.{$config[0]['id']}",
+                'order' => 'created_at.desc',
+            ]);
+        }
+
+        $channel = $this->db($request)->get('channel_connections', [
+            'id' => "eq.{$channelConnectionId}",
+        ]);
+
+        $data = [
+            'channel' => $channel[0] ?? null,
+            'bot_config' => $config[0] ?? null,
+            'sessions' => is_array($sessions) ? $sessions : [],
+        ];
+
+        return $this->ok($data, 'Polling detail');
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // MOCK DATA HELPERS
     // ══════════════════════════════════════════════════════════════
+
+    private function db(Request $request): \App\Services\SupabaseService
+    {
+        return app(\App\Services\SupabaseService::class);
+    }
+
+    private function fetchTelegramPollingData(string $userId): array
+    {
+        $channels = $this->db(request())->get('channel_connections', [
+            'user_id' => "eq.{$userId}",
+            'channel' => 'eq.telegram',
+            'is_active' => 'eq.true',
+        ]);
+
+        if (empty($channels) || !is_array($channels)) {
+            return [];
+        }
+
+        return array_map(function ($ch) {
+            $configRows = $this->db(request())->get('telegram_bot_configs', [
+                'channel_connection_id' => "eq.{$ch['id']}",
+            ]);
+
+            $config = $configRows[0] ?? null;
+            $sessions = [];
+
+            if ($config) {
+                $sessionRows = $this->db(request())->get('telegram_polling_sessions', [
+                    'telegram_bot_config_id' => "eq.{$config['id']}",
+                    'order' => 'created_at.desc',
+                ]);
+                $sessions = is_array($sessionRows) ? $sessionRows : [];
+            }
+
+            return [
+                'channel_connection_id' => $ch['id'],
+                'channel_name' => $ch['channel_name'] ?? $ch['channel'],
+                'bot_username' => $ch['channel_meta']['bot_username'] ?? null,
+                'polling_enabled' => $config['polling_enabled'] ?? false,
+                'session_status' => $config['session_status'] ?? 'unknown',
+                'polling_offset' => $config['polling_offset'] ?? 0,
+                'last_update_id' => $config['last_update_id'] ?? null,
+                'updates_processed' => $config['updates_processed'] ?? 0,
+                'updates_failed' => $config['updates_failed'] ?? 0,
+                'consecutive_errors' => $config['consecutive_errors'] ?? 0,
+                'session_error' => $config['session_error'] ?? null,
+                'last_poll_started_at' => $config['last_poll_started_at'] ?? null,
+                'last_poll_completed_at' => $config['last_poll_completed_at'] ?? null,
+                'last_polled_at' => $ch['last_polled_at'] ?? null,
+                'sessions_count' => count($sessions),
+                'active_sessions' => array_values(array_filter($sessions, fn($s) => $s['is_active'] ?? false)),
+            ];
+        }, $channels);
+    }
+
+private function mockPollingData(): array
+    {
+        return [
+            'total_telegram_channels' => 3,
+            'active_polling_channels' => 2,
+            'total_active_sessions' => 2,
+            'total_updates_processed' => 1847,
+            'total_updates_failed' => 12,
+            'channels' => [
+                [
+                    'channel_connection_id' => 'ch_telegram_main',
+                    'channel_name' => 'OpenClaw Main',
+                    'bot_username' => '@OpenClawBot',
+                    'polling_enabled' => true,
+                    'session_status' => 'running',
+                    'polling_offset' => 42871,
+                    'last_update_id' => 42870,
+                    'updates_processed' => 1240,
+                    'updates_failed' => 3,
+                    'consecutive_errors' => 0,
+                    'session_error' => null,
+                    'last_poll_started_at' => now()->subSeconds(30)->toISOString(),
+                    'last_poll_completed_at' => now()->subSeconds(12)->toISOString(),
+                    'last_polled_at' => now()->subSeconds(12)->toISOString(),
+                    'sessions_count' => 1,
+                    'active_sessions' => [
+                        [
+                            'worker_id' => gethostname() . ':12345',
+                            'is_active' => true,
+                            'total_cycles' => 412,
+                            'total_updates' => 1240,
+                            'last_poll_at' => now()->subSeconds(12)->toISOString(),
+                            'last_poll_duration_ms' => 340,
+                            'worker_heartbeat_at' => now()->subSeconds(5)->toISOString(),
+                        ],
+                    ],
+                ],
+                [
+                    'channel_connection_id' => 'ch_telegram_alerts',
+                    'channel_name' => 'Alerts Bot',
+                    'bot_username' => '@AlertsClawBot',
+                    'polling_enabled' => true,
+                    'session_status' => 'running',
+                    'polling_offset' => 9914,
+                    'last_update_id' => 9913,
+                    'updates_processed' => 607,
+                    'updates_failed' => 9,
+                    'consecutive_errors' => 0,
+                    'session_error' => null,
+                    'last_poll_started_at' => now()->subSeconds(45)->toISOString(),
+                    'last_poll_completed_at' => now()->subSeconds(20)->toISOString(),
+                    'last_polled_at' => now()->subSeconds(20)->toISOString(),
+                    'sessions_count' => 1,
+                    'active_sessions' => [
+                        [
+                            'worker_id' => gethostname() . ':67890',
+                            'is_active' => true,
+                            'total_cycles' => 188,
+                            'total_updates' => 607,
+                            'last_poll_at' => now()->subSeconds(20)->toISOString(),
+                            'last_poll_duration_ms' => 180,
+                            'worker_heartbeat_at' => now()->subSeconds(8)->toISOString(),
+                        ],
+                    ],
+                ],
+                [
+                    'channel_connection_id' => 'ch_telegram_offline',
+                    'channel_name' => 'Legacy Bot',
+                    'bot_username' => '@LegacyClawBot',
+                    'polling_enabled' => false,
+                    'session_status' => 'idle',
+                    'polling_offset' => 0,
+                    'last_update_id' => null,
+                    'updates_processed' => 0,
+                    'updates_failed' => 0,
+                    'consecutive_errors' => 5,
+                    'session_error' => 'Connection refused: bot token revoked',
+                    'last_poll_started_at' => now()->subDays(3)->toISOString(),
+                    'last_poll_completed_at' => now()->subDays(3)->toISOString(),
+                    'last_polled_at' => now()->subDays(3)->toISOString(),
+                    'sessions_count' => 1,
+                    'active_sessions' => [],
+                ],
+            ],
+        ];
+    }
 
     private function mockMetrics(): array
     {
@@ -343,6 +548,9 @@ class AgentOpsController extends Controller
             'knowledge_files' => 8,
             'active_knowledge_files' => 6,
             'alerts_count' => 5,
+            'polling_enabled_channels' => 2,
+            'polling_sessions_active' => 2,
+            'polling_updates_processed_today' => 1847,
         ];
     }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Bot, Send } from 'lucide-react'
+import { Bot, Send, Play, Square, Loader } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
 import type { AIAgent } from '@/types'
@@ -9,12 +9,39 @@ export function AIPage() {
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [runtimeLoading, setRuntimeLoading] = useState(false)
 
   useEffect(() => {
     api.ai.status()
       .then(res => setAgent(res as unknown as AIAgent))
       .catch(() => {})
   }, [])
+
+  const runtime = agent?.runtime
+  const runtimeStatusColors: Record<string, string> = {
+    stopped: '#6b7280',
+    running: '#10b981',
+    paused: '#f59e0b',
+    error: '#ef4444',
+  }
+
+  const handleStartRuntime = async () => {
+    setRuntimeLoading(true)
+    try {
+      await api.ai.startRuntime()
+      setAgent(prev => prev ? { ...prev, runtime: { status: 'running', started_at: new Date().toISOString(), tasks_in_progress: 0, tasks_completed: 0, errors_count: 0 } } : prev)
+    } catch { /* silent */ }
+    finally { setRuntimeLoading(false) }
+  }
+
+  const handleStopRuntime = async () => {
+    setRuntimeLoading(true)
+    try {
+      await api.ai.stopRuntime()
+      setAgent(prev => prev ? { ...prev, runtime: { status: 'stopped', tasks_in_progress: 0, tasks_completed: 0, errors_count: 0 } } : prev)
+    } catch { /* silent */ }
+    finally { setRuntimeLoading(false) }
+  }
 
   const handleSend = async () => {
     if (!input.trim() || loading) return
@@ -60,7 +87,69 @@ export function AIPage() {
             ))}
           </div>
         )}
+        {/* Runtime controls */}
+        <div className="ml-4 flex items-center gap-2">
+          {runtime && (
+            <div className="flex items-center gap-2 mr-2">
+              <div style={{
+                width: '8px', height: '8px', borderRadius: '50%',
+                background: runtimeStatusColors[runtime.status] ?? '#6b7280',
+                boxShadow: runtime.status === 'running' ? `0 0 6px ${runtimeStatusColors[runtime.status]}70` : 'none',
+              }} />
+              <span className="text-xs text-text-muted capitalize">{runtime.status}</span>
+              {runtime.status === 'running' && runtime.uptime_seconds != null && (
+                <span className="text-xs text-text-muted">
+                  {Math.floor(runtime.uptime_seconds / 60)}m {runtime.uptime_seconds % 60}s
+                </span>
+              )}
+            </div>
+          )}
+          {!runtime || runtime.status === 'stopped' || runtime.status === 'error' ? (
+            <button
+              onClick={handleStartRuntime}
+              disabled={runtimeLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+            >
+              {runtimeLoading ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+              Start
+            </button>
+          ) : (
+            <button
+              onClick={handleStopRuntime}
+              disabled={runtimeLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-semibold hover:bg-red-500/20 transition-colors disabled:opacity-50"
+            >
+              {runtimeLoading ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Square className="w-3.5 h-3.5" />}
+              Stop
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Runtime metrics bar */}
+      {runtime && runtime.status === 'running' && (
+        <div className="flex items-center gap-4 px-6 py-2 border-b border-surface-border bg-surface-secondary/30">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-text-muted">In Progress</span>
+            <span className="text-xs font-bold text-accent">{runtime.tasks_in_progress}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-text-muted">Completed</span>
+            <span className="text-xs font-bold text-emerald-400">{runtime.tasks_completed}</span>
+          </div>
+          {runtime.errors_count > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-text-muted">Errors</span>
+              <span className="text-xs font-bold text-red-400">{runtime.errors_count}</span>
+            </div>
+          )}
+          {runtime.last_error && (
+            <span className="text-xs text-red-400/70 truncate max-w-[200px]" title={runtime.last_error}>
+              {runtime.last_error}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto p-6 space-y-4">

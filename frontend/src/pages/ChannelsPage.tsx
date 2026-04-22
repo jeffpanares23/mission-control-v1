@@ -270,6 +270,8 @@ function ChannelDetailPanel({
   onResumeAgent,
   onReconnect,
   onTriggerCron,
+  onStartPolling,
+  onStopPolling,
 }: {
   channel: ChannelWithAgents
   cronJobs: CronJob[]
@@ -281,11 +283,20 @@ function ChannelDetailPanel({
   onResumeAgent: (channelId: string, agentId: string) => void
   onReconnect: (channelId: string) => void
   onTriggerCron: (channelId: string, cronJobId: string) => void
+  onStartPolling: (channelId: string) => void
+  onStopPolling: (channelId: string) => void
 }) {
   const { botUsername, chatCount } = getTelegramMeta(channel.channel_meta)
   const status = getConnectionStatus(channel)
   const statusColor = getConnectionColor(status)
   const primaryAgent = channel.assigned_agents.find(a => a.is_primary)
+  const polling = channel.polling
+  const isTelegram = channel.channel === 'telegram'
+  const pollingStatusColors: Record<string, string> = {
+    stopped: '#6b7280',
+    running: '#10b981',
+    error: '#ef4444',
+  }
 
   return (
     <div style={{
@@ -382,6 +393,72 @@ function ChannelDetailPanel({
             )}
           </div>
         </section>
+
+        {/* ── Telegram Polling (Telegram only) ── */}
+        {isTelegram && (
+          <section>
+            <SectionTitle>
+              <span>Telegram Polling</span>
+              {polling && (
+                <span style={{
+                  fontSize: '10px', padding: '1px 6px',
+                  background: `${pollingStatusColors[polling.status] ?? '#6b7280'}18`,
+                  border: `1px solid ${pollingStatusColors[polling.status] ?? '#6b7280'}45`,
+                  borderRadius: '10px',
+                  color: pollingStatusColors[polling.status] ?? '#6b7280',
+                  fontWeight: 600,
+                }}>{polling.status}</span>
+              )}
+            </SectionTitle>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+              {polling && (
+                <>
+                  {polling.started_at && (
+                    <MetaRow label="Started" value={<span style={{ fontSize: '11px' }}>{formatRelative(polling.started_at)}</span>} />
+                  )}
+                  {polling.last_update_id != null && (
+                    <MetaRow label="Last update ID" value={<span style={{ fontSize: '11px' }}>{polling.last_update_id.toLocaleString()}</span>} />
+                  )}
+                  {polling.updates_pending > 0 && (
+                    <MetaRow label="Pending" value={<span style={{ fontSize: '11px', color: '#f59e0b' }}>{polling.updates_pending}</span>} />
+                  )}
+                  {polling.error_message && (
+                    <div style={{
+                      padding: '8px 10px',
+                      background: 'rgba(239,68,68,0.1)',
+                      border: '1px solid rgba(239,68,68,0.3)',
+                      borderRadius: '8px',
+                      fontSize: '11px',
+                      color: '#ef4444',
+                    }}>
+                      <AlertCircle className="w-[10px] h-[10px] inline mr-1" />
+                      {polling.error_message}
+                    </div>
+                  )}
+                </>
+              )}
+              <div style={{ display: 'flex', gap: '6px' }}>
+                {(!polling || polling.status === 'stopped' || polling.status === 'error') ? (
+                  <ActionBtn
+                    icon={<Play className="w-[11px] h-[11px]" />}
+                    label="Start Polling"
+                    color="#10b981"
+                    loading={actionLoadingId === 'startPolling'}
+                    onClick={() => onStartPolling(channel.id)}
+                  />
+                ) : (
+                  <ActionBtn
+                    icon={<Pause className="w-[11px] h-[11px]" />}
+                    label="Stop Polling"
+                    color="#f59e0b"
+                    loading={actionLoadingId === 'stopPolling'}
+                    onClick={() => onStopPolling(channel.id)}
+                  />
+                )}
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* ── Assigned Agents ── */}
         <section>
@@ -931,6 +1008,32 @@ export function ChannelsPage() {
     finally { setTriggeringCronId(null) }
   }, [])
 
+  const handleStartPolling = useCallback(async (channelId: string) => {
+    setActionLoadingId('startPolling')
+    try {
+      await api.ai.startPolling(channelId)
+      setChannels(prev => prev.map(ch =>
+        ch.id === channelId
+          ? { ...ch, polling: { status: 'running', started_at: new Date().toISOString(), updates_pending: 0 } }
+          : ch
+      ))
+    } catch { /* silent */ }
+    finally { setActionLoadingId(null) }
+  }, [])
+
+  const handleStopPolling = useCallback(async (channelId: string) => {
+    setActionLoadingId('stopPolling')
+    try {
+      await api.ai.stopPolling(channelId)
+      setChannels(prev => prev.map(ch =>
+        ch.id === channelId
+          ? { ...ch, polling: { status: 'stopped', updates_pending: 0 } }
+          : ch
+      ))
+    } catch { /* silent */ }
+    finally { setActionLoadingId(null) }
+  }, [])
+
   const handleClosePanel = () => setSelectedChannelId(null)
 
   // ── Render ───────────────────────────────────────────────
@@ -1050,6 +1153,8 @@ export function ChannelsPage() {
           onResumeAgent={(chId, _agentId) => handleResumeAgent(chId)}
           onReconnect={handleReconnect}
           onTriggerCron={handleTriggerCron}
+          onStartPolling={handleStartPolling}
+          onStopPolling={handleStopPolling}
         />
       )}
     </div>

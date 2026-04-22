@@ -10,6 +10,31 @@ export type ReminderRecurrence = 'once' | 'daily' | 'weekly' | 'monthly' | 'year
 export type InsightType = 'task_overdue' | 'upcoming_anniversary' | 'schedule_conflict' | 'ai_suggestion' | 'productivity_tip' | 'channel_alert';
 export type AIAgentStatus = 'idle' | 'thinking' | 'acting' | 'error' | 'offline';
 
+// ─── Telegram Polling ─────────────────────────────────────────
+export type TelegramPollingStatus = 'stopped' | 'running' | 'error';
+
+export interface TelegramPollingState {
+  status: TelegramPollingStatus;
+  started_at?: string;
+  error_message?: string;
+  updates_pending: number;
+  last_update_id?: number;
+}
+
+// ─── Agent Runtime ─────────────────────────────────────────────
+export type RuntimeStatus = 'stopped' | 'running' | 'paused' | 'error';
+
+export interface RuntimeState {
+  status: RuntimeStatus;
+  started_at?: string;
+  stopped_at?: string;
+  uptime_seconds?: number;
+  tasks_in_progress: number;
+  tasks_completed: number;
+  errors_count: number;
+  last_error?: string;
+}
+
 // ─── Account ───────────────────────────────────────────────
 export interface Account {
   id: string;
@@ -138,6 +163,7 @@ export interface AIAgent {
     insights_generated: number;
     conversations_handled: number;
   };
+  runtime?: RuntimeState;
   metadata: Record<string, unknown>;
 }
 
@@ -159,6 +185,8 @@ export interface ChannelConnection {
   last_ping_at?: string;
   created_at: string;
   updated_at: string;
+  // Telegram polling state (telegram channels only)
+  polling?: TelegramPollingState;
 }
 
 // ─── Dashboard Stats ─────────────────────────────────────────

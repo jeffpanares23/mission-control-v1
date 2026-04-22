@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\AgentOpsController;
+use App\Http\Controllers\Api\TelegramPollingController;
 
 /*
 ||--------------------------------------------------------------------------
@@ -108,8 +109,22 @@ Route::prefix('v1')->group(function () {
         Route::post('agent-ops/channels/{id}/trigger-cron',      [AgentOpsController::class, 'triggerChannelCron']);
         Route::get('agent-ops/cron-jobs',                        [AgentOpsController::class, 'cronJobs']);
         Route::post('agent-ops/cron-jobs/{id}/run',              [AgentOpsController::class, 'runCronJob']);
-        Route::post('agent-ops/cron-jobs/{id}/pause',            [AgentOpsController::class, 'pauseCronJob']);
-        Route::post('agent-ops/cron-jobs/{id}/resume',           [AgentOpsController::class, 'resumeCronJob']);
+        Route::get('agent-ops/polling',                        [AgentOpsController::class, 'pollingOverview']);
+        Route::get('agent-ops/polling/{channelConnectionId}',  [AgentOpsController::class, 'pollingDetail']);
+
+        // ─── Telegram Polling (getUpdates-based, no domain required) ──
+        // DOMAIN-DEFERRED: These routes use polling mode now. Switch to webhook
+        // mode (setWebhook) when a domain + HTTPS are available.
+        Route::prefix('agent-ops/telegram-polling')->group(function () {
+            Route::get('status/{channelConnectionId}',   [TelegramPollingController::class, 'status']);
+            Route::post('start/{channelConnectionId}',   [TelegramPollingController::class, 'start']);
+            Route::post('stop/{channelConnectionId}',    [TelegramPollingController::class, 'stop']);
+            Route::post('poll/{channelConnectionId}',    [TelegramPollingController::class, 'poll']);
+            Route::post('acknowledge/{channelConnectionId}', [TelegramPollingController::class, 'acknowledge']);
+            Route::patch('settings/{channelConnectionId}', [TelegramPollingController::class, 'updateSettings']);
+            Route::get('sessions/{channelConnectionId}', [TelegramPollingController::class, 'listSessions']);
+        });
+
         Route::get('agent-ops/knowledge-files',                  [AgentOpsController::class, 'knowledgeFiles']);
         Route::get('agent-ops/knowledge-files/{id}',             [AgentOpsController::class, 'getKnowledgeFile']);
         Route::patch('agent-ops/knowledge-files/{id}',           [AgentOpsController::class, 'updateKnowledgeFile']);

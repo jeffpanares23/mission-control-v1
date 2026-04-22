@@ -222,10 +222,18 @@ export const api = {
 
   // ─── AI Agent ───────────────────────────────────────────────
   ai: {
-    status: () => get<{ id: string; name: string; status: string; model: string; stats: Record<string, number> }>('/ai/status'),
+    status: () => get<{ id: string; name: string; status: string; model: string; stats: Record<string, number>; runtime?: import('@/types').RuntimeState }>('/ai/status'),
     chat: (message: string) => post<{ reply: string; agent_status: string }>('/ai/chat', { message }),
     dispatch: (task_id: string, instruction: string) =>
       post<{ dispatched: boolean; task_id: string }>('/ai/dispatch', { task_id, instruction }),
+    // Agent runtime control
+    startRuntime: () => post('/ai/runtime/start'),
+    stopRuntime: () => post('/ai/runtime/stop'),
+    // Telegram polling control (for telegram channels)
+    startPolling: (channelId: string) =>
+      post(`/ai/channels/${channelId}/start-polling`),
+    stopPolling: (channelId: string) =>
+      post(`/ai/channels/${channelId}/stop-polling`),
   },
 
   // ─── Reports ────────────────────────────────────────────────
