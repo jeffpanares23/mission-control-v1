@@ -3,7 +3,7 @@ import {
   Plus, Calendar, AlertTriangle, ArrowRight, GripVertical,
   Radio, Clock, Zap, CheckCircle2, XCircle, Pause, Play,
   BookOpen, FileText, ChevronRight, RefreshCw,
-  Bot, List, LayoutGrid,
+  Bot, List, LayoutGrid, Loader,
 } from 'lucide-react'
 import { cn, formatRelative } from '@/lib/utils'
 import { api } from '@/lib/api'
@@ -626,8 +626,13 @@ function CronMonitor() {
   const [jobs, setJobs] = useState<CronJob[]>([])
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'all' | 'failed' | 'running' | 'paused'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'failed' | 'running' | 'paused' | 'idle'>('all')
+  const [channelFilter, setChannelFilter] = useState<string>('all')
+  const [runningIds, setRunningIds] = useState<Set<string>>(new Set())
+  const [pausingIds, setPausingIds] = useState<Set<string>>(new Set())
+  const [resumingIds, setResumingIds] = useState<Set<string>>(new Set())
 
+  // Load cron jobs on mount
   useEffect(() => {
     api.agentOps.cronJobs.list().then(data => {
       setJobs(data)
@@ -635,35 +640,110 @@ function CronMonitor() {
     }).catch(() => setLoading(false))
   }, [])
 
+  // Derive unique channels for filter dropdown
+  const channels = Array.from(
+    new Map(
+      jobs
+        .filter(j => j.channel_id && j.channel_name)
+        .map(j => [j.channel_id!, j.channel_name!])
+    ).entries()
+  ).map(([id, name]) => ({ id, name }))
+
   const filtered = jobs.filter(j => {
-    if (filter === 'all') return true
-    if (filter === 'failed') return j.status === 'failed' || j.last_run_result === 'failed'
-    if (filter === 'running') return j.status === 'running'
-    if (filter === 'paused') return j.status === 'paused'
+    if (statusFilter === 'failed') return j.status === 'failed' || j.last_run_result === 'failed'
+    if (statusFilter !== 'all') return j.status === statusFilter
+    if (channelFilter !== 'all') return j.channel_id === channelFilter
     return true
   })
+
+  const activeCount  = jobs.filter(j => j.status === 'active').length
+  const runningCount = jobs.filter(j => j.status === 'running').length
+  const failedCount  = jobs.filter(j => j.status === 'failed').length
+  const pausedCount  = jobs.filter(j => j.status === 'paused').length
+
+  const handleRun = (jobId: string) => {
+    setRunningIds(prev => new Set(prev).add(jobId))
+    api.agentOps.cronJobs.run(jobId)
+      .then(() => {
+        setJobs(prev => prev.map(j =>
+          j.id === jobId ? { ...j, status: 'running', last_run_at: new Date().toISOString() } : j
+        ))
+      })
+      .catch(() => {})
+      .finally(() => setRunningIds(prev => { const s = new Set(prev); s.delete(jobId); return s }))
+  }
+
+  const handlePause = (jobId: string) => {
+    setPausingIds(prev => new Set(prev).add(jobId))
+    api.agentOps.cronJobs.pause(jobId)
+      .then(() => setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'paused' } : j)))
+      .catch(() => {})
+      .finally(() => setPausingIds(prev => { const s = new Set(prev); s.delete(jobId); return s }))
+  }
+
+  const handleResume = (jobId: string) => {
+    setResumingIds(prev => new Set(prev).add(jobId))
+    api.agentOps.cronJobs.resume(jobId)
+      .then(() => setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'active' } : j)))
+      .catch(() => {})
+      .finally(() => setResumingIds(prev => { const s = new Set(prev); s.delete(jobId); return s }))
+  }
 
   if (loading) return <CronSkeleton />
 
   return (
     <div style={{ padding: '10px' }}>
-      {/* Summary row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', marginBottom: '10px' }}>
-        <CronStatPill label="Active" value={jobs.filter(j => j.status === 'active').length} color="#10b981" />
-        <CronStatPill label="Failed" value={jobs.filter(j => j.status === 'failed').length} color="#ef4444" />
-        <CronStatPill label="Paused" value={jobs.filter(j => j.status === 'paused').length} color="#f59e0b" />
+      {/* Summary row — 4-column */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr 1fr 1fr',
+        gap: '6px', marginBottom: '10px',
+      }}>
+        <CronStatPill label="Active"  value={activeCount}  color="#10b981" />
+        <CronStatPill label="Running" value={runningCount} color="#3b82f6" />
+        <CronStatPill label="Failed"  value={failedCount}  color="#ef4444" />
+        <CronStatPill label="Paused"  value={pausedCount}  color="#f59e0b" />
       </div>
 
-      {/* Filter tabs */}
-      <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
-        {(['all', 'failed', 'running', 'paused'] as const).map(f => (
-          <button key={f} onClick={() => setFilter(f)} style={{
-            flex: 1, padding: '4px', fontSize: '10px', fontWeight: 600,
-            background: filter === f ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.03)',
-            border: `1px solid ${filter === f ? 'rgba(59,130,246,0.4)' : 'var(--color-border)'}`,
-            borderRadius: '6px', cursor: 'pointer', color: filter === f ? '#60a5fa' : 'var(--color-text-3)',
-            textTransform: 'capitalize',
-          }}>{f}</button>
+      {/* Channel filter dropdown */}
+      {channels.length > 0 && (
+        <div style={{ marginBottom: '8px' }}>
+          <select
+            value={channelFilter}
+            onChange={e => setChannelFilter(e.target.value)}
+            style={{
+              width: '100%', padding: '5px 8px', fontSize: '11px',
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid var(--color-border)',
+              borderRadius: '6px', color: 'var(--color-text)',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="all">All Channels</option>
+            {channels.map(ch => (
+              <option key={ch.id} value={ch.id}>{ch.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Status filter tabs */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '8px', flexWrap: 'wrap' }}>
+        {(['all', 'failed', 'running', 'paused', 'idle'] as const).map(f => (
+          <button
+            key={f}
+            onClick={() => setStatusFilter(f)}
+            style={{
+              flex: 1, minWidth: '40px', padding: '4px 2px',
+              fontSize: '10px', fontWeight: 600,
+              background: statusFilter === f ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.03)',
+              border: `1px solid ${statusFilter === f ? 'rgba(59,130,246,0.4)' : 'var(--color-border)'}`,
+              borderRadius: '6px', cursor: 'pointer',
+              color: statusFilter === f ? '#60a5fa' : 'var(--color-text-3)',
+              textTransform: 'capitalize',
+              whiteSpace: 'nowrap',
+            }}
+          >{f}</button>
         ))}
       </div>
 
@@ -675,18 +755,17 @@ function CronMonitor() {
             job={job}
             expanded={expanded === job.id}
             onToggle={() => setExpanded(expanded === job.id ? null : job.id)}
-            onPause={() => api.agentOps.cronJobs.pause(job.id).then(() =>
-              setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'paused' } : j))
-            ).catch(() => {})}
-            onResume={() => api.agentOps.cronJobs.resume(job.id).then(() =>
-              setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'active' } : j))
-            ).catch(() => {})}
-            onRun={() => api.agentOps.cronJobs.run(job.id).catch(() => {})}
+            onPause={() => handlePause(job.id)}
+            onResume={() => handleResume(job.id)}
+            onRun={() => handleRun(job.id)}
+            isRunning={runningIds.has(job.id)}
+            isPausing={pausingIds.has(job.id)}
+            isResuming={resumingIds.has(job.id)}
           />
         ))}
         {filtered.length === 0 && (
           <p style={{ textAlign: 'center', padding: '20px', fontSize: '12px', color: 'var(--color-text-3)' }}>
-            No jobs match this filter
+            No jobs match the selected filters
           </p>
         )}
       </div>
@@ -709,9 +788,11 @@ function CronStatPill({ label, value, color }: { label: string; value: number; c
 
 function CronJobRow({
   job, expanded, onToggle, onPause, onResume, onRun,
+  isRunning, isPausing, isResuming,
 }: {
   job: CronJob; expanded: boolean; onToggle: () => void
   onPause: () => void; onResume: () => void; onRun: () => void
+  isRunning?: boolean; isPausing?: boolean; isResuming?: boolean
 }) {
   const statusColor: Record<string, string> = {
     active: '#10b981', running: '#3b82f6', paused: '#f59e0b', failed: '#ef4444', idle: '#6b7280',
@@ -736,6 +817,11 @@ function CronJobRow({
           </p>
           <p style={{ fontSize: '10px', color: 'var(--color-text-3)' }}>
             {job.schedule ?? job.cron_expression}
+            {job.channel_name && (
+              <span style={{ marginLeft: '5px', color: '#60a5fa' }}>
+                · {job.channel_name}
+              </span>
+            )}
           </p>
         </div>
         {job.last_run_result && resultIcon[job.last_run_result]}
@@ -745,8 +831,24 @@ function CronJobRow({
       {expanded && (
         <div style={{ borderTop: '1px solid var(--color-border)', padding: '8px 10px', background: 'rgba(0,0,0,0.15)' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
+            {/* Channel + Agent meta */}
+            {job.channel_name && (
+              <CronMetaRow
+                label="Channel"
+                value={<span style={{ color: '#60a5fa', fontSize: '10px' }}>{job.channel_name}</span>}
+              />
+            )}
+            {job.agent_name && (
+              <CronMetaRow
+                label="Agent"
+                value={<span style={{ fontSize: '10px' }}>{job.agent_name}</span>}
+              />
+            )}
             {job.last_run_at && (
-              <CronMetaRow label="Last run" value={`${formatRelative(job.last_run_at)} · ${job.last_run_duration_ms}ms`} />
+              <CronMetaRow
+                label="Last run"
+                value={`${formatRelative(job.last_run_at)}${job.last_run_duration_ms ? ` · ${job.last_run_duration_ms}ms` : ''}`}
+              />
             )}
             {job.next_run_at && (
               <CronMetaRow label="Next run" value={formatRelative(job.next_run_at)} />
@@ -766,12 +868,39 @@ function CronJobRow({
           {/* Action buttons */}
           <div style={{ display: 'flex', gap: '5px' }}>
             {job.status === 'active' && (
-              <CronActionBtn icon={<Pause className="w-[9px] h-[9px]" />} label="Pause" onClick={onPause} color="#f59e0b" />
+              <CronActionBtn
+                icon={<Pause className="w-[9px] h-[9px]" />}
+                label={isPausing ? 'Pausing…' : 'Pause'}
+                onClick={onPause}
+                color="#f59e0b"
+                loading={isPausing}
+              />
             )}
             {job.status === 'paused' && (
-              <CronActionBtn icon={<Play className="w-[9px] h-[9px]" />} label="Resume" onClick={onResume} color="#10b981" />
+              <CronActionBtn
+                icon={<Play className="w-[9px] h-[9px]" />}
+                label={isResuming ? 'Resuming…' : 'Resume'}
+                onClick={onResume}
+                color="#10b981"
+                loading={isResuming}
+              />
             )}
-            <CronActionBtn icon={<Zap className="w-[9px] h-[9px]" />} label="Run Now" onClick={onRun} color="#3b82f6" />
+            {job.status === 'idle' && (
+              <CronActionBtn
+                icon={<Play className="w-[9px] h-[9px]" />}
+                label={isResuming ? 'Resuming…' : 'Activate'}
+                onClick={onResume}
+                color="#10b981"
+                loading={isResuming}
+              />
+            )}
+            <CronActionBtn
+              icon={<Zap className="w-[9px] h-[9px]" />}
+              label={isRunning ? 'Running…' : 'Run Now'}
+              onClick={onRun}
+              color="#3b82f6"
+              loading={isRunning}
+            />
           </div>
         </div>
       )}
@@ -779,7 +908,7 @@ function CronJobRow({
   )
 }
 
-function CronMetaRow({ label, value }: { label: string; value: string }) {
+function CronMetaRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
       <span style={{ fontSize: '10px', color: 'var(--color-text-3)' }}>{label}</span>
@@ -788,15 +917,23 @@ function CronMetaRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function CronActionBtn({ icon, label, onClick, color }: { icon: React.ReactNode; label: string; onClick: () => void; color: string }) {
+function CronActionBtn({ icon, label, onClick, color, loading }: { icon: React.ReactNode; label: string; onClick: () => void; color: string; loading?: boolean }) {
   return (
-    <button onClick={onClick} style={{
-      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-      padding: '4px 6px',
-      background: `${color}15`, border: `1px solid ${color}35`,
-      borderRadius: '5px', cursor: 'pointer',
-    }}>
-      <span style={{ color }}>{icon}</span>
+    <button
+      onClick={onClick}
+      disabled={loading}
+      style={{
+        flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+        padding: '4px 6px',
+        background: `${color}15`, border: `1px solid ${color}35`,
+        borderRadius: '5px', cursor: loading ? 'not-allowed' : 'pointer',
+        opacity: loading ? 0.65 : 1,
+      }}
+    >
+      {loading
+        ? <Loader className="w-[9px] h-[9px] animate-spin" style={{ color }} />
+        : <span style={{ color }}>{icon}</span>
+      }
       <span style={{ fontSize: '10px', fontWeight: 600, color }}>{label}</span>
     </button>
   )
@@ -805,8 +942,8 @@ function CronActionBtn({ icon, label, onClick, color }: { icon: React.ReactNode;
 function CronSkeleton() {
   return (
     <div style={{ padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
-        {[1, 2, 3].map(i => <div key={i} style={{ height: '44px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)', animation: 'pulse 2s infinite' }} />)}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '6px', marginBottom: '10px' }}>
+        {[1, 2, 3, 4].map(i => <div key={i} style={{ height: '44px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)', animation: 'pulse 2s infinite' }} />)}
       </div>
       {[1, 2, 3].map(i => <div key={i} style={{ height: '52px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--color-border)', animation: 'pulse 2s infinite' }} />)}
     </div>
