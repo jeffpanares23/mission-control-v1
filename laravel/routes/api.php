@@ -105,6 +105,7 @@ Route::prefix('v1')->group(function () {
         Route::post('agent-ops/channels/{id}/pause-agent',       [AgentOpsController::class, 'pauseChannelAgent']);
         Route::post('agent-ops/channels/{id}/resume-agent',      [AgentOpsController::class, 'resumeChannelAgent']);
         Route::post('agent-ops/channels/{id}/reconnect',         [AgentOpsController::class, 'reconnectChannel']);
+        Route::post('agent-ops/channels/{id}/trigger-cron',      [AgentOpsController::class, 'triggerChannelCron']);
         Route::get('agent-ops/cron-jobs',                        [AgentOpsController::class, 'cronJobs']);
         Route::post('agent-ops/cron-jobs/{id}/run',              [AgentOpsController::class, 'runCronJob']);
         Route::post('agent-ops/cron-jobs/{id}/pause',            [AgentOpsController::class, 'pauseCronJob']);

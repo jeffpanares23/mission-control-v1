@@ -277,6 +277,8 @@ export const api = {
         post(`/agent-ops/channels/${channelId}/resume-agent`),
       reconnect: (channelId: string) =>
         post(`/agent-ops/channels/${channelId}/reconnect`),
+      triggerCron: (channelId: string, cronJobId: string) =>
+        post(`/agent-ops/channels/${channelId}/trigger-cron`, { cron_job_id: cronJobId }),
     },
 
     // Cron Jobs

@@ -111,6 +111,31 @@ class AgentOpsController extends Controller
         ], 'Channel reconnection initiated.');
     }
 
+    /**
+     * POST /api/v1/agent-ops/channels/{id}/trigger-cron
+     * Manually trigger a cron job associated with this channel.
+     */
+    public function triggerChannelCron(Request $request, string $id): \Illuminate\Http\JsonResponse
+    {
+        $cronJobId = $request->input('cron_job_id');
+
+        if (!$cronJobId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'cron_job_id is required.',
+            ], 422);
+        }
+
+        return $this->ok([
+            'channel_id' => $id,
+            'cron_job_id' => $cronJobId,
+            'run_id' => 'run_' . uniqid(),
+            'triggered_at' => now()->toISOString(),
+            'estimated_duration_ms' => 3000,
+            'trigger_type' => 'manual',
+        ], 'Cron job triggered manually.');
+    }
+
     // ══════════════════════════════════════════════════════════════
     // CRON JOBS
     // ══════════════════════════════════════════════════════════════
