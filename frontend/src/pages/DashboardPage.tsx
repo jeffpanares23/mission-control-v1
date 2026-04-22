@@ -18,7 +18,7 @@ import type {
 
 const TASK_COLUMNS: { id: string; title: string; status: TaskStatus }[] = [
   { id: 'backlog',     title: 'Backlog',      status: 'backlog' },
-  { id: 'todo',        title: 'To Do',         status: 'todo' },
+  { id: 'scheduled',   title: 'Scheduled',    status: 'scheduled' },
   { id: 'in_progress', title: 'In Progress',  status: 'in_progress' },
   { id: 'review',      title: 'Review',        status: 'review' },
   { id: 'done',        title: 'Done',          status: 'done' },

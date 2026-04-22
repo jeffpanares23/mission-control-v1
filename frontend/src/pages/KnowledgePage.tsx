@@ -6,10 +6,10 @@ import { useState, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
-  BookOpen, FileText, FileJson, FileCode, Search, Filter,
-  Loader, RefreshCw, AlertTriangle, CheckCircle2, X,
-  Bot, Hash, Clock, Tag, Weight, Archive, ArchiveRestore,
-  Eye, EyeOff, ChevronRight, ExternalLink, Info,
+  BookOpen, FileText, FileJson, FileCode, Search,
+  Loader, RefreshCw, AlertTriangle, X,
+  Bot, Hash, Tag, Weight, Archive, ArchiveRestore,
+  Eye, EyeOff, Info,
   PanelRightOpen, PanelRightClose,
 } from 'lucide-react'
 import { cn, formatDate, formatRelative } from '@/lib/utils'
@@ -227,29 +227,29 @@ export function KnowledgePage() {
           </form>
 
           {/* Status filter */}
-          <FilterSelect label="Status" value={filters.status}
-            options={[['all','All'],['active','Active'],['archived','Archived'],['disabled','Disabled']]}
+          <FilterSelect value={filters.status}
+            options={[['all','All'],['active','Active'],['archived','Archived'],['disabled','Disabled']] as [string, string][]}
             onChange={v => setFilters(p => ({ ...p, status: v }))} />
 
           {/* Channel filter */}
-          <FilterSelect label="Channel" value={filters.channel_id}
-            options={[['all','All Channels'], ...channelOptions.map(c => [c.id, c.name])]}
+          <FilterSelect value={filters.channel_id}
+            options={[['all','All Channels'], ...channelOptions.map(c => [c.id, c.name] as [string, string])]}
             onChange={v => setFilters(p => ({ ...p, channel_id: v }))} />
 
           {/* Agent filter */}
-          <FilterSelect label="Agent" value={filters.agent_id}
-            options={[['all','All Agents'], ...agentOptions.map(a => [a.id, a.name])]}
+          <FilterSelect value={filters.agent_id}
+            options={[['all','All Agents'], ...agentOptions.map(a => [a.id, a.name] as [string, string])]}
             onChange={v => setFilters(p => ({ ...p, agent_id: v }))} />
 
           {/* File type */}
-          <FilterSelect label="Type" value={filters.file_type}
-            options={[['all','All Types'],['markdown','Markdown'],['json','JSON'],['yaml','YAML'],['text','Text']]}
+          <FilterSelect value={filters.file_type}
+            options={[['all','All Types'],['markdown','Markdown'],['json','JSON'],['yaml','YAML'],['text','Text']] as [string, string][]}
             onChange={v => setFilters(p => ({ ...p, file_type: v }))} />
 
           {/* Tag filter */}
           {tagOptions.length > 0 && (
-            <FilterSelect label="Tag" value={filters.tag}
-              options={[['all','All Tags'], ...tagOptions.map(t => [t, t])]}
+            <FilterSelect value={filters.tag}
+              options={[['all','All Tags'], ...tagOptions.map(t => [t, t] as [string, string])]}
               onChange={v => setFilters(p => ({ ...p, tag: v }))} />
           )}
 
@@ -332,9 +332,9 @@ export function KnowledgePage() {
 // Filter Select
 // ─────────────────────────────────────────────────────────────
 function FilterSelect({
-  label, value, options, onChange,
+  value, options, onChange,
 }: {
-  label: string; value: string
+  value: string
   options: [string, string][]
   onChange: (v: string) => void
 }) {

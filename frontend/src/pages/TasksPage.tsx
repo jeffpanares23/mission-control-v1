@@ -4,7 +4,7 @@
 // ============================================================
 import { useState, useEffect, useCallback } from 'react'
 import {
-  Plus, Filter, Loader, LayoutGrid, List, X, ChevronDown,
+  Plus, Loader, LayoutGrid, List, X, ChevronDown,
   Bot, Hash, Clock, AlertTriangle, CheckCircle2, Calendar,
   Zap, RefreshCw, Trash2, Edit2, GripVertical,
 } from 'lucide-react'
@@ -241,7 +241,7 @@ export function TasksPage() {
 
           {/* Filter dropdowns */}
           <FilterDropdown label="Status" value={statusFilter}
-            options={[['all','All'],...BOARD_COLUMNS.map(c=>[c.status,c.title])]}
+            options={[['all','All'],...BOARD_COLUMNS.map(c=>[c.status,c.title] as [string, string])]}
             onChange={setStatusFilter} />
           <FilterDropdown label="Priority" value={priorityFilter}
             options={[['all','All'],['urgent','Urgent'],['high','High'],['medium','Medium'],['low','Low']]}
@@ -269,7 +269,6 @@ export function TasksPage() {
             tasksByColumn={tasksByColumn}
             onEdit={openEdit}
             onDelete={(id) => setDeletingId(id)}
-            onStatusChange={handleStatusChange}
             onMove={handleMove}
             deletingId={deletingId}
           />
@@ -355,11 +354,11 @@ function FilterDropdown({
 // Board View
 // ─────────────────────────────────────────────────────────────
 function BoardView({
-  tasksByColumn, onEdit, onDelete, onStatusChange, onMove, deletingId,
+  tasksByColumn, onEdit, onDelete, onMove, deletingId,
 }: {
   tasksByColumn: Record<string, Task[]>
   onEdit: (t: Task) => void; onDelete: (id: string) => void
-  onStatusChange: (id: string, s: TaskStatus) => void; onMove: (id: string, s: TaskStatus) => void
+  onMove: (id: string, s: TaskStatus) => void
   deletingId: string | null
 }) {
   return (
@@ -385,7 +384,6 @@ function BoardView({
                 task={task}
                 onEdit={() => onEdit(task)}
                 onDelete={() => onDelete(task.id)}
-                onStatusChange={(s) => onStatusChange(task.id, s)}
                 onMove={(s) => onMove(task.id, s)}
                 isDeleting={deletingId === task.id}
               />
@@ -407,10 +405,10 @@ function BoardView({
 }
 
 function BoardTaskCard({
-  task, onEdit, onDelete, onStatusChange, onMove, isDeleting,
+  task, onEdit, onDelete, onMove, isDeleting,
 }: {
   task: Task; onEdit: () => void; onDelete: () => void
-  onStatusChange: (s: TaskStatus) => void; onMove: (s: TaskStatus) => void
+  onMove: (s: TaskStatus) => void
   isDeleting: boolean
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -567,7 +565,7 @@ function ListTaskRow({
   task: Task; onEdit: () => void; onDelete: () => void
   onStatusChange: (s: TaskStatus) => void
 }) {
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [_menuOpen, _setMenuOpen] = [false, () => {}]
   const isOverdue = !!task.due_date && new Date(task.due_date) < new Date() && task.status !== 'done'
   const pCfg = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG.medium
   const sCfg = STATUS_CONFIG[task.status] ?? STATUS_CONFIG.backlog
