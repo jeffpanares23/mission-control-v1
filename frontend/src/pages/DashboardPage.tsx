@@ -3,7 +3,7 @@ import {
   Plus, Calendar, AlertTriangle, ArrowRight, GripVertical,
   Radio, Clock, Zap, CheckCircle2, XCircle, Pause, Play,
   BookOpen, FileText, ChevronRight, RefreshCw,
-  Bot, List, LayoutGrid, Loader,
+  Bot, List, LayoutGrid, Loader, Edit2, Hash,
 } from 'lucide-react'
 import { cn, formatRelative } from '@/lib/utils'
 import { api } from '@/lib/api'
@@ -46,6 +46,13 @@ const CHANNEL_ICON: Record<string, string> = {
   whatsapp: '💬',
   email:    '📧',
   web:      '🌐',
+}
+
+const TRIGGER_CONFIG_DASH: Record<string, { label: string; icon: React.ReactNode; color: string; bg: string }> = {
+  manual:  { label: 'Manual',  icon: <Edit2       className="w-[9px] h-[9px]" />, color: '#9ca3af', bg: 'rgba(156,163,175,0.15)' },
+  cron:    { label: 'Cron',    icon: <Clock       className="w-[9px] h-[9px]" />, color: '#60a5fa', bg: 'rgba(96,165,250,0.15)'  },
+  channel: { label: 'Channel', icon: <Hash        className="w-[9px] h-[9px]" />, color: '#a78bfa', bg: 'rgba(167,139,250,0.15)' },
+  system:  { label: 'System',  icon: <Zap        className="w-[9px] h-[9px]" />, color: '#f97316', bg: 'rgba(249,115,22,0.15)'  },
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -477,6 +484,7 @@ function KanbanColumn({ id, title, tasks }: { id: string; title: string; tasks: 
 
 function TaskCard({ task }: { task: Task }) {
   const isOverdue = !!task.due_date && new Date(task.due_date) < new Date() && task.status !== 'done'
+  const tCfg = task.trigger_source ? TRIGGER_CONFIG_DASH[task.trigger_source] : null
   return (
     <div className="task-card" style={{ position: 'relative' }}>
       <div style={{
@@ -485,9 +493,17 @@ function TaskCard({ task }: { task: Task }) {
         background: PRIORITY_COLOR[task.priority] ?? '#3b82f6',
       }} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px', paddingLeft: '10px' }}>
-        <span className={cn('badge', TASK_STATUS_BADGE[task.status])} style={{ fontSize: '9px' }}>
-          {task.status.replace('_', ' ')}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span className={cn('badge', TASK_STATUS_BADGE[task.status])} style={{ fontSize: '9px' }}>
+            {task.status.replace('_', ' ')}
+          </span>
+          {tCfg && (
+            <span className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[9px] font-medium"
+              style={{ color: tCfg.color, background: tCfg.bg }}>
+              {tCfg.icon}{tCfg.label}
+            </span>
+          )}
+        </div>
         {isOverdue && <AlertTriangle className="w-[11px] h-[11px]" style={{ color: 'var(--color-error)' }} />}
       </div>
       <p style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text)', marginBottom: '8px', paddingLeft: '10px', lineHeight: 1.4 }}>
@@ -506,6 +522,11 @@ function TaskCard({ task }: { task: Task }) {
           {task.channel_name && (
             <span style={{ fontSize: '10px', color: 'var(--color-text-3)' }}>
               {CHANNEL_ICON[task.channel_id?.replace('ch_', '') ?? ''] ?? ''} {task.channel_name}
+            </span>
+          )}
+          {task.agent_name && (
+            <span style={{ fontSize: '10px', color: '#60a5fa' }}>
+              <Bot className="w-[10px] h-[10px] inline" /> {task.agent_name}
             </span>
           )}
         </div>

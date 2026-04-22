@@ -3,7 +3,8 @@
 // ============================================================
 
 export type ChannelType = 'telegram' | 'discord' | 'whatsapp' | 'email' | 'web';
-export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'review' | 'done' | 'cancelled';
+export type TaskStatus = 'backlog' | 'scheduled' | 'in_progress' | 'waiting' | 'review' | 'done' | 'cancelled';
+export type TaskTriggerSource = 'manual' | 'cron' | 'channel' | 'system';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type ReminderRecurrence = 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly';
 export type InsightType = 'task_overdue' | 'upcoming_anniversary' | 'schedule_conflict' | 'ai_suggestion' | 'productivity_tip' | 'channel_alert';
@@ -49,7 +50,7 @@ export interface Task {
   channel_name?: string;
   agent_id?: string;
   agent_name?: string;
-  trigger_source?: 'cron' | 'manual' | 'channel' | 'system';
+  trigger_source?: TaskTriggerSource;
 }
 
 // ─── Kanban Column ──────────────────────────────────────────

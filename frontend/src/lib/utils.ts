@@ -39,12 +39,14 @@ export function priorityColor(priority: string): string {
 
 export function statusColor(status: string): string {
   switch (status) {
-    case 'done': return 'badge-success'
+    case 'done':        return 'badge-success'
     case 'in_progress': return 'badge-info'
-    case 'review': return 'badge-warning'
-    case 'todo': return 'badge-neutral'
-    case 'backlog': return 'badge-neutral'
-    case 'cancelled': return 'badge-error'
-    default: return 'badge-neutral'
+    case 'review':      return 'badge-warning'
+    case 'scheduled':   return 'badge-info'
+    case 'waiting':     return 'badge-purple'
+    case 'todo':        return 'badge-neutral'
+    case 'backlog':     return 'badge-neutral'
+    case 'cancelled':   return 'badge-error'
+    default:            return 'badge-neutral'
   }
 }
