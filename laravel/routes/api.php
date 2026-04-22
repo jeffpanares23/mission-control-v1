@@ -111,6 +111,7 @@ Route::prefix('v1')->group(function () {
         Route::post('agent-ops/cron-jobs/{id}/pause',            [AgentOpsController::class, 'pauseCronJob']);
         Route::post('agent-ops/cron-jobs/{id}/resume',           [AgentOpsController::class, 'resumeCronJob']);
         Route::get('agent-ops/knowledge-files',                  [AgentOpsController::class, 'knowledgeFiles']);
+        Route::get('agent-ops/knowledge-files/{id}',             [AgentOpsController::class, 'getKnowledgeFile']);
         Route::patch('agent-ops/knowledge-files/{id}',           [AgentOpsController::class, 'updateKnowledgeFile']);
     });
 });

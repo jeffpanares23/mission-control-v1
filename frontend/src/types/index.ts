@@ -281,6 +281,7 @@ export interface CronJob {
 
 // ─── Knowledge / Markdown File ─────────────────────────────
 export type KnowledgeFileStatus = 'active' | 'archived' | 'disabled';
+export type KnowledgeFileType   = 'markdown' | 'text' | 'json' | 'yaml';
 
 export interface KnowledgeFile {
   id: string;
@@ -288,11 +289,11 @@ export interface KnowledgeFile {
   title?: string;
   path: string;
   file_size_bytes?: number;
-  file_type: 'markdown' | 'text' | 'json' | 'yaml';
+  file_type: KnowledgeFileType;
   tags: string[];
-  channel_id?: string;
+  channel_id?: string | null;
   channel_name?: string;
-  agent_id?: string;
+  agent_id?: string | null;
   agent_name?: string;
   is_enabled: boolean;
   status: KnowledgeFileStatus;
@@ -301,6 +302,8 @@ export interface KnowledgeFile {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  // Populated when fetching a single file for preview
+  content?: string;
 }
 
 // ─── Operational Insight ───────────────────────────────────

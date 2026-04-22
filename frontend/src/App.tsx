@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { AccountsPage } from './pages/AccountsPage'
 import { TasksPage } from './pages/TasksPage'
+import { KnowledgePage } from './pages/KnowledgePage'
 import { AnniversariesPage } from './pages/AnniversariesPage'
 import { RemindersPage } from './pages/RemindersPage'
 import { SchedulesPage } from './pages/SchedulesPage'
@@ -36,6 +37,7 @@ function App() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/tasks" element={<TasksPage />} />
+            <Route path="/knowledge" element={<KnowledgePage />} />
             <Route path="/anniversaries" element={<AnniversariesPage />} />
             <Route path="/reminders" element={<RemindersPage />} />
             <Route path="/schedules" element={<SchedulesPage />} />

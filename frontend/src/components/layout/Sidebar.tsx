@@ -33,6 +33,7 @@ const insightsNav = [
 
 const systemNav = [
   { to: '/ai',        label: 'AI Agent',  icon: Bot },
+  { to: '/knowledge', label: 'Knowledge',  icon: BookOpen },
   { to: '/channels',  label: 'Channels',   icon: Plug },
   { to: '/settings',   label: 'Settings',   icon: Settings },
 ]

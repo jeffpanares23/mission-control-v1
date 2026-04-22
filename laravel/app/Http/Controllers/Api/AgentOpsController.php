@@ -205,12 +205,15 @@ class AgentOpsController extends Controller
 
     /**
      * GET /api/v1/agent-ops/knowledge-files
-     * Query params: channel_id, status
+     * Query params: channel_id, status, agent_id, file_type, tags
      */
     public function knowledgeFiles(Request $request): \Illuminate\Http\JsonResponse
     {
         $channelId = $request->query('channel_id');
-        $status = $request->query('status');
+        $agentId   = $request->query('agent_id');
+        $status    = $request->query('status');
+        $fileType  = $request->query('file_type');
+        $tag       = $request->query('tag');
 
         $files = $this->mockKnowledgeFiles();
 
@@ -218,27 +221,103 @@ class AgentOpsController extends Controller
             $files = array_values(array_filter($files, fn($f) => ($f['channel_id'] ?? '') === $channelId));
         }
 
+        if ($agentId) {
+            $files = array_values(array_filter($files, fn($f) => ($f['agent_id'] ?? '') === $agentId));
+        }
+
         if ($status) {
             $files = array_values(array_filter($files, fn($f) => $f['status'] === $status));
+        }
+
+        if ($fileType) {
+            $files = array_values(array_filter($files, fn($f) => $f['file_type'] === $fileType));
+        }
+
+        if ($tag) {
+            $files = array_values(array_filter($files, fn($f) => in_array($tag, $f['tags'] ?? [])));
         }
 
         return $this->ok($files);
     }
 
     /**
+     * GET /api/v1/agent-ops/knowledge-files/{id}
+     * Returns a single file with content for preview.
+     */
+    public function getKnowledgeFile(string $id): \Illuminate\Http\JsonResponse
+    {
+        $files = $this->mockKnowledgeFiles();
+        $file = null;
+        foreach ($files as $f) {
+            if ($f['id'] === $id) { $file = $f; break; }
+        }
+
+        if (!$file) {
+            return response()->json(['success' => false, 'message' => 'File not found', 'data' => null], 404);
+        }
+
+        // Attach mock markdown content for preview
+        $file['content'] = $this->mockKnowledgeFileContent($file);
+
+        return $this->ok($file);
+    }
+
+    /**
      * PATCH /api/v1/agent-ops/knowledge-files/{id}
-     * Body: { is_enabled: bool }
+     * Body: {
+     *   is_enabled?: bool,
+     *   status?: 'active' | 'archived' | 'disabled',
+     *   channel_id?: string,
+     *   agent_id?: string,
+     *   instruction_weight?: float,
+     *   tags?: string[]
+     * }
      */
     public function updateKnowledgeFile(Request $request, string $id): \Illuminate\Http\JsonResponse
     {
-        $enabled = $request->input('is_enabled', true);
+        $files = $this->mockKnowledgeFiles();
+        $file = null;
+        foreach ($files as $f) {
+            if ($f['id'] === $id) { $file = $f; break; }
+        }
 
-        return $this->ok([
-            'id' => $id,
-            'is_enabled' => $enabled,
-            'status' => $enabled ? 'active' : 'disabled',
-            'updated_at' => now()->toISOString(),
-        ], $enabled ? 'Knowledge file enabled.' : 'Knowledge file disabled.');
+        if (!$file) {
+            return response()->json(['success' => false, 'message' => 'File not found', 'data' => null], 404);
+        }
+
+        // Apply updates
+        if ($request->has('is_enabled')) {
+            $file['is_enabled'] = (bool) $request->input('is_enabled');
+            $file['status'] = $file['is_enabled'] ? 'active' : 'disabled';
+        }
+
+        if ($request->has('status')) {
+            $newStatus = $request->input('status');
+            if (in_array($newStatus, ['active', 'archived', 'disabled'])) {
+                $file['status'] = $newStatus;
+                $file['is_enabled'] = $newStatus !== 'disabled';
+            }
+        }
+
+        if ($request->has('channel_id')) {
+            $file['channel_id'] = $request->input('channel_id') ?: null;
+        }
+
+        if ($request->has('agent_id')) {
+            $file['agent_id'] = $request->input('agent_id') ?: null;
+        }
+
+        if ($request->has('instruction_weight')) {
+            $file['instruction_weight'] = (float) $request->input('instruction_weight');
+        }
+
+        if ($request->has('tags')) {
+            $file['tags'] = $request->input('tags', []);
+        }
+
+        $file['updated_at'] = now()->toISOString();
+
+        return $this->ok($file, 'Knowledge file updated.');
     }
 
     // ══════════════════════════════════════════════════════════════

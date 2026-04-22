@@ -297,12 +297,28 @@ export const api = {
 
     // Knowledge Files
     knowledgeFiles: {
-      list: (params?: { channel_id?: string; status?: string }) => {
-        const qs = params ? '?' + new URLSearchParams(params).toString() : ''
+      list: (params?: {
+        channel_id?: string
+        agent_id?: string
+        status?: string
+        file_type?: string
+        tag?: string
+      }) => {
+        const qs = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : ''
         return get<KnowledgeFile[]>(`/agent-ops/knowledge-files${qs}`)
       },
+      get: (id: string) =>
+        get<KnowledgeFile>(`/agent-ops/knowledge-files/${id}`),
+      update: (id: string, data: {
+        is_enabled?: boolean
+        status?: string
+        channel_id?: string | null
+        agent_id?: string | null
+        instruction_weight?: number
+        tags?: string[]
+      }) => patch<KnowledgeFile>(`/agent-ops/knowledge-files/${id}`, data),
       toggle: (id: string, enabled: boolean) =>
-        patch(`/agent-ops/knowledge-files/${id}`, { is_enabled: enabled }),
+        patch<KnowledgeFile>(`/agent-ops/knowledge-files/${id}`, { is_enabled: enabled }),
     },
   },
 
