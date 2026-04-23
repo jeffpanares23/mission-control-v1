@@ -30,6 +30,9 @@ class AIAgentController extends BaseApiController
             'model'           => $agent['model'],
             'stats'           => $agent['stats'],
             'current_task_id'  => $agent['current_task_id'],
+            'last_heartbeat'  => $agent['last_heartbeat'] ?? null,
+            'last_error'      => $agent['last_error'] ?? null,
+            'is_active'       => $agent['is_active'] ?? true,
         ]);
     }
 

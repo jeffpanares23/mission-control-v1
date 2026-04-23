@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\AgentHeartbeatController;
 use App\Http\Controllers\Api\AgentOpsController;
 use App\Http\Controllers\Api\TelegramPollingController;
 
@@ -92,6 +93,10 @@ Route::prefix('v1')->group(function () {
         Route::post('ai/chat',     [AIAgentController::class, 'chat']);
         Route::post('ai/dispatch', [AIAgentController::class, 'dispatch']);
 
+        // ─── Agent Heartbeat (Hermes pings every 10–30s) ───────────
+        Route::post('agents/heartbeat',      [AgentHeartbeatController::class, 'beat']);
+        Route::get('agents/{id}/status',     [AgentHeartbeatController::class, 'status']);
+
         // ─── Settings ───────────────────────────────────────────────
         Route::get('settings',              [SettingsController::class, 'index']);
         Route::put('settings/{key}',        [SettingsController::class, 'update']);
@@ -109,6 +114,7 @@ Route::prefix('v1')->group(function () {
         Route::post('agent-ops/channels/{id}/trigger-cron',      [AgentOpsController::class, 'triggerChannelCron']);
         Route::get('agent-ops/cron-jobs',                        [AgentOpsController::class, 'cronJobs']);
         Route::post('agent-ops/cron-jobs/{id}/run',              [AgentOpsController::class, 'runCronJob']);
+        Route::post('agent-ops/tasks/{taskId}/assign',           [AgentOpsController::class, 'assignAgentToTask']);
         Route::get('agent-ops/polling',                        [AgentOpsController::class, 'pollingOverview']);
         Route::get('agent-ops/polling/{channelConnectionId}',  [AgentOpsController::class, 'pollingDetail']);
 

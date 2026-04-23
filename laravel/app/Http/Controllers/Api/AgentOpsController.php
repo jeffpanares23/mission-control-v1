@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use App\Services\SupabaseService;
+use App\Services\TelegramPollingService;
 
 /**
  * AgentOpsController
@@ -15,6 +17,10 @@ use Illuminate\Routing\Controller;
  */
 class AgentOpsController extends Controller
 {
+    public function __construct(
+        private SupabaseService $db,
+    ) {}
+
     // ══════════════════════════════════════════════════════════════
     // HELPER — return ok() wrapped data (mimics BaseApiController::ok)
     // ══════════════════════════════════════════════════════════════
@@ -24,6 +30,14 @@ class AgentOpsController extends Controller
             'success' => true,
             'message' => $message,
             'data' => $data,
+        ], $code);
+    }
+
+    private function error(string $message, int $code = 400): \Illuminate\Http\JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $message,
         ], $code);
     }
 
@@ -78,10 +92,29 @@ class AgentOpsController extends Controller
      */
     public function pauseChannelAgent(Request $request, string $id): \Illuminate\Http\JsonResponse
     {
+        $channel = $this->resolveChannel($id);
+        if ($channel instanceof \Illuminate\Http\JsonResponse) {
+            return $channel;
+        }
+
+        if (($channel['channel'] ?? '') !== 'telegram') {
+            return $this->error('Only Telegram channels support agent pause/resume via polling.', 422);
+        }
+
+        $result = $this->telegramPollingAction($id, 'stop');
+        if ($result instanceof \Illuminate\Http\JsonResponse) {
+            return $result;
+        }
+
+        // Mark the agent as idle on this channel
+        $this->db->update('ai_agents',
+            ['id' => $channel['agent_id'] ?? null],
+            ['status' => 'idle', 'current_task_id' => null]
+        );
+
         return $this->ok([
             'channel_id' => $id,
             'agent_action' => 'paused',
-            'message' => 'Agent paused on channel.',
             'paused_at' => now()->toISOString(),
         ], 'Agent paused on channel.');
     }
@@ -91,49 +124,184 @@ class AgentOpsController extends Controller
      */
     public function resumeChannelAgent(Request $request, string $id): \Illuminate\Http\JsonResponse
     {
+        $channel = $this->resolveChannel($id);
+        if ($channel instanceof \Illuminate\Http\JsonResponse) {
+            return $channel;
+        }
+
+        if (($channel['channel'] ?? '') !== 'telegram') {
+            return $this->error('Only Telegram channels support agent pause/resume via polling.', 422);
+        }
+
+        $result = $this->telegramPollingAction($id, 'start');
+        if ($result instanceof \Illuminate\Http\JsonResponse) {
+            return $result;
+        }
+
         return $this->ok([
             'channel_id' => $id,
             'agent_action' => 'resumed',
-            'message' => 'Agent resumed on channel.',
             'resumed_at' => now()->toISOString(),
         ], 'Agent resumed on channel.');
     }
 
     /**
      * POST /api/v1/agent-ops/channels/{id}/reconnect
+     * Stop polling then start polling (full reconnection cycle).
      */
     public function reconnectChannel(Request $request, string $id): \Illuminate\Http\JsonResponse
     {
+        $channel = $this->resolveChannel($id);
+        if ($channel instanceof \Illuminate\Http\JsonResponse) {
+            return $channel;
+        }
+
+        if (($channel['channel'] ?? '') !== 'telegram') {
+            return $this->error('Only Telegram channels support reconnection via polling.', 422);
+        }
+
+        // Stop first
+        $this->telegramPollingAction($id, 'stop');
+
+        // Then start fresh
+        $result = $this->telegramPollingAction($id, 'start');
+        if ($result instanceof \Illuminate\Http\JsonResponse) {
+            return $result;
+        }
+
         return $this->ok([
             'channel_id' => $id,
             'reconnect_started_at' => now()->toISOString(),
-            'estimated_completion' => now()->addSeconds(5)->toISOString(),
+            'message' => 'Channel reconnected successfully.',
         ], 'Channel reconnection initiated.');
     }
 
     /**
      * POST /api/v1/agent-ops/channels/{id}/trigger-cron
-     * Manually trigger a cron job associated with this channel.
+     * Manually trigger the scheduled tasks processor for this channel.
      */
     public function triggerChannelCron(Request $request, string $id): \Illuminate\Http\JsonResponse
     {
-        $cronJobId = $request->input('cron_job_id');
-
-        if (!$cronJobId) {
-            return response()->json([
-                'success' => false,
-                'message' => 'cron_job_id is required.',
-            ], 422);
+        $channel = $this->resolveChannel($id);
+        if ($channel instanceof \Illuminate\Http\JsonResponse) {
+            return $channel;
         }
+
+        // Run the schedule:process command
+        \Illuminate\Support\Facades\Artisan::call('schedule:process', [], $output = new \Symfony\Component\Console\Output\BufferedOutput());
 
         return $this->ok([
             'channel_id' => $id,
-            'cron_job_id' => $cronJobId,
-            'run_id' => 'run_' . uniqid(),
             'triggered_at' => now()->toISOString(),
-            'estimated_duration_ms' => 3000,
-            'trigger_type' => 'manual',
-        ], 'Cron job triggered manually.');
+            'command' => 'schedule:process',
+            'output' => trim($output->fetch()),
+        ], 'Scheduled tasks processor triggered.');
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // AGENT TASK ASSIGNMENT
+    // POST /api/v1/agent-ops/tasks/{taskId}/assign
+    // ══════════════════════════════════════════════════════════════
+
+    /**
+     * POST /api/v1/agent-ops/tasks/{taskId}/assign
+     * Assign an AI agent to a task.
+     */
+    public function assignAgentToTask(Request $request, string $taskId): \Illuminate\Http\JsonResponse
+    {
+        $request->validate([
+            'agent_id' => 'required|uuid',
+        ]);
+
+        $agentId = $request->input('agent_id');
+        $user = $request->attributes->get('user');
+        $userId = $user['id'] ?? null;
+
+        // Verify agent belongs to this user
+        $agents = $this->db->get('ai_agents', [
+            'id' => "eq.{$agentId}",
+            'user_id' => "eq.{$userId}",
+        ]);
+        if (empty($agents) || !is_array($agents[0] ?? null)) {
+            return $this->error('Agent not found.', 404);
+        }
+
+        // Verify task belongs to this user
+        $tasks = $this->db->get('tasks', [
+            'id' => "eq.{$taskId}",
+            'user_id' => "eq.{$userId}",
+        ]);
+        if (empty($tasks) || !is_array($tasks[0] ?? null)) {
+            return $this->error('Task not found.', 404);
+        }
+
+        // Assign agent to task
+        $this->db->update('tasks', ['id' => $taskId], [
+            'agent_id' => $agentId,
+            'trigger_source' => 'agent_dispatch',
+        ]);
+
+        // Update agent status
+        $this->db->update('ai_agents', ['id' => $agentId], [
+            'status' => 'acting',
+            'current_task_id' => $taskId,
+        ]);
+
+        // Log activity
+        $this->db->insert('activity_log', [
+            'user_id' => $userId,
+            'action_type' => 'task_assigned',
+            'entity_type' => 'task',
+            'entity_id' => $taskId,
+            'metadata' => ['agent_id' => $agentId],
+        ]);
+
+        return $this->ok([
+            'task_id' => $taskId,
+            'agent_id' => $agentId,
+            'assigned_at' => now()->toISOString(),
+        ], 'Agent assigned to task.');
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // PRIVATE HELPERS
+    // ══════════════════════════════════════════════════════════════
+
+    private function resolveChannel(string $channelId): array|\Illuminate\Http\JsonResponse
+    {
+        $channel = $this->db->get('channel_connections', ['id' => "eq.{$channelId}"]);
+        if (empty($channel) || !is_array($channel[0] ?? null)) {
+            return $this->error('Channel not found.', 404);
+        }
+        return $channel[0];
+    }
+
+    private function telegramPollingAction(string $channelConnectionId, string $action): \Illuminate\Http\JsonResponse|array
+    {
+        $channel = $this->db->get('channel_connections', ['id' => "eq.{$channelConnectionId}"]);
+        if (empty($channel) || !is_array($channel[0] ?? null)) {
+            return $this->error('Channel not found.', 404);
+        }
+        $conn = $channel[0];
+
+        if (empty($conn['bot_token'])) {
+            return $this->error('No bot_token on this channel connection.', 422);
+        }
+
+        $workerId = 'ops-panel:' . gethostname() . ':' . getmypid();
+        $service = new TelegramPollingService($this->db, $conn['bot_token'], $channelConnectionId);
+
+        if ($action === 'start') {
+            $result = $service->startPolling($workerId);
+        } else {
+            $result = $service->stopPolling($workerId);
+        }
+
+        if (!$result['went_ok']) {
+            return $this->error($result['message'], 422);
+        }
+
+        return $result;
     }
 
     // ══════════════════════════════════════════════════════════════
