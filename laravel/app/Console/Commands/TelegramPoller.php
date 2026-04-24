@@ -2,294 +2,447 @@
 
 namespace App\Console\Commands;
 
+use App\Services\AgentDatabaseService;
 use App\Services\SupabaseService;
-use App\Services\TelegramPollingService;
+use GuzzleHttp\Client;
+use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 /**
  * TelegramPoller
  *
- * Scheduled polling command for Telegram bot channels.
- * Runs every minute via Laravel scheduler.
+ * Long-polls Telegram for each active bot connection and converts
+ * "/task <title>" messages into Mission Control tasks.
  *
  * Usage:
- *   php artisan telegram:poll           — poll all enabled channels once
- *   php artisan telegram:poll --fresh   — force fresh session (ignores active sessions)
+ *   php artisan telegram:poll
+ *   php artisan telegram:poll --once   # single poll cycle (no loop)
  *
- * This command:
- * 1. Finds all Telegram channel_connections where polling_enabled = true
- * 2. For each channel, executes one poll cycle via TelegramPollingService
- * 3. Saves incoming updates to the task log (activity_log + raw_updates)
- * 4. Acknowledges processed updates (advances polling_offset)
- * 5. Updates channel_connections: polling_offset, last_polled_at
+ * This command is idempotent — it uses polling_offset to avoid
+ * processing the same update twice.
  */
 class TelegramPoller extends Command
 {
-    protected $signature = 'telegram:poll {--fresh : Force fresh session, ignore existing active sessions}';
+    protected $signature = 'telegram:poll
+                            {--once : Run a single poll cycle instead of looping}
+                            {--sleep=5 : Seconds to wait between poll cycles (when not --once)}';
 
-    protected $description = 'Poll all Telegram channels with polling_enabled=true (run every minute via scheduler)';
+    protected $description = 'Long-poll Telegram bots and create tasks for /task commands';
+
+    private Client $http;
 
     public function __construct(
-        private SupabaseService $db,
+        private SupabaseService $supabase,
+        private AgentDatabaseService $agentDbFactory
     ) {
         parent::__construct();
+        $this->http = new Client(['timeout' => 60]);
     }
 
     public function handle(): int
     {
-        $this->info('Telegram polling job started');
+        $this->info('Starting Telegram poll cycle...');
 
-        // Find all Telegram channels with polling enabled
-        $channels = $this->db->get('channel_connections', [
-            'channel' => 'eq.telegram',
-            'polling_enabled' => 'eq.true',
-            'is_active' => 'eq.true',
-        ]);
+        // ─── Load all active polling connections ──────────────────────
+        $connections = $this->loadConnections();
 
-        if (($channels['error'] ?? false) || empty($channels)) {
-            $this->warn('No active Telegram channels with polling enabled found.');
+        if (count($connections) === 0) {
+            $this->warn('No active Telegram connections with polling enabled.');
             return Command::SUCCESS;
         }
 
-        $this->info(sprintf('Found %d Telegram channel(s) to poll', count($channels)));
+        $this->info(sprintf('Found %d active connection(s).', count($connections)));
 
-        $processedTotal = 0;
-        $errorsTotal = 0;
+        // ─── Poll each connection ────────────────────────────────────
+        $totalCreated = 0;
+        foreach ($connections as $conn) {
+            $created = $this->pollConnection($conn);
+            $totalCreated += $created;
+        }
 
-        foreach ($channels as $channel) {
-            $channelId = $channel['id'] ?? null;
-            $botToken = $channel['bot_token'] ?? null;
+        $this->info(sprintf('Poll cycle complete. %d task(s) created.', $totalCreated));
 
-            if (!$channelId || !$botToken) {
-                $this->error("Channel {$channelId}: missing bot_token, skipping.");
-                $errorsTotal++;
-                continue;
-            }
+        return Command::SUCCESS;
+    }
 
-            $this->line("Polling channel: {$channelId}");
+    // ─── Private helpers ────────────────────────────────────────────────
 
-            try {
-                $result = $this->pollChannel($channel, $botToken);
-                $processedTotal += $result['processed'];
-                if ($result['errors'] > 0) {
-                    $errorsTotal += $result['errors'];
-                }
-            } catch (\Throwable $e) {
-                $this->error("Channel {$channelId}: {$e->getMessage()}");
-                $this->logError($channelId, $e->getMessage());
-                $errorsTotal++;
-            }
+    /**
+     * Load active Telegram channel connections with polling enabled.
+     * Uses the service role key so we bypass RLS.
+     */
+    private function loadConnections(): array
+    {
+        $serviceKey = config('supabase.service_role_key');
+
+        $result = $this->supabase->get(
+            'channel_connections',
+            [
+                'select'   => '*',
+                'channel'  => 'eq.telegram',
+                'is_active'=> 'eq.true',
+                'polling_enabled' => 'eq.true',
+            ],
+            $serviceKey
+        );
+
+        if (isset($result['error'])) {
+            Log::error('TelegramPoller: failed to load connections', [
+                'error' => $result['error'],
+            ]);
+            $this->error('Failed to load channel connections: ' . ($result['error']['message'] ?? $result['error']));
+            return [];
+        }
+
+        return is_array($result) ? $result : [];
+    }
+
+    /**
+     * Poll a single Telegram connection for updates.
+     */
+    private function pollConnection(array $conn): int
+    {
+        $connId    = $conn['id'] ?? 'unknown';
+        $botToken  = $conn['credentials']['bot_token'] ?? null;
+        $offset    = intval($conn['polling_offset'] ?? 0);
+        $userId    = $conn['user_id'] ?? null;
+
+        if (empty($botToken)) {
+            $this->warn("Connection {$connId}: no bot_token in credentials, skipping.");
+            Log::warning("TelegramPoller: no bot_token", ['conn_id' => $connId]);
+            return 0;
+        }
+
+        $this->line("Polling connection {$connId} (offset={$offset})...");
+
+        // ─── Call getUpdates ────────────────────────────────────────
+        $updates = $this->fetchUpdates($botToken, $offset);
+
+        if ($updates === null) {
+            // API failure — log and skip offset update
+            return 0;
+        }
+
+        if (empty($updates)) {
+            $this->info("Connection {$connId}: no new updates.");
+            $this->updatePollingOffset($connId, $offset);
+            return 0;
         }
 
         $this->info(sprintf(
-            'Polling complete. Processed: %d updates, Errors: %d',
-            $processedTotal,
-            $errorsTotal
+            "Connection %s: %d update(s) received.",
+            $connId,
+            count($updates)
         ));
 
-        return $errorsTotal > 0 ? Command::FAILURE : Command::SUCCESS;
-    }
-
-    /**
-     * Execute one poll cycle for a single channel.
-     */
-    private function pollChannel(array $channel, string $botToken): array
-    {
-        $channelId = $channel['id'];
-        $workerId = 'scheduler:' . gethostname() . ':' . getmypid();
-
-        $service = new TelegramPollingService($this->db, $botToken, $channelId);
-
-        // Start (or heartbeat) a polling session
-        $startResult = $service->startPolling($workerId);
-        if (!$startResult['went_ok']) {
-            $this->warn("  Could not start session: {$startResult['message']}");
-            return ['processed' => 0, 'errors' => 1];
-        }
-
-        // Execute one poll cycle
-        $pollResult = $service->pollOnce($workerId);
-
-        if (!$pollResult['went_ok'] && !($pollResult['is_idle'] ?? false)) {
-            $this->warn("  Poll failed: {$pollResult['error']}");
-            $this->logError($channelId, $pollResult['error'] ?? 'Poll failed');
-            return ['processed' => 0, 'errors' => 1];
-        }
-
-        $updates = $pollResult['updates'] ?? [];
-        $updatesCount = count($updates);
-
-        if ($updatesCount > 0) {
-            $this->info("  Received {$updatesCount} update(s)");
-            $this->processUpdates($channelId, $updates, $botToken);
-        } else {
-            $this->line('  No new updates');
-        }
-
-        // Acknowledge the updates (advance offset)
-        if (!empty($updates)) {
-            $service->acknowledgeUpdates($workerId, $updates);
-            $this->line("  Acknowledged {$updatesCount} update(s)");
-        }
-
-        // Update channel_connections with last_polled_at
-        $this->db->update('channel_connections',
-            ['id' => $channelId],
-            ['last_polled_at' => now()->toISOString()]
-        );
-
-        return ['processed' => $updatesCount, 'errors' => 0];
-    }
-
-    /**
-     * Process incoming Telegram updates — save to activity_log and raw_updates.
-     * Also converts /task commands into tasks.
-     */
-    private function processUpdates(string $channelId, array $updates, string $botToken): void
-    {
-        $userId = $this->getChannelUser($channelId);
-        if (!$userId) {
-            $this->warn("  Could not determine user_id for channel {$channelId}, skipping activity log");
-            return;
-        }
+        // ─── Process each update ─────────────────────────────────────
+        $tasksCreated = 0;
+        $lastUpdateId = $offset;
 
         foreach ($updates as $update) {
             $updateId = $update['update_id'] ?? null;
-            $message = $update['message'] ?? $update['edited_message'] ?? $update['callback_query'] ?? null;
+            $message  = $update['message'] ?? null;
 
-            if (!$message) {
+            if (!$updateId) {
+                Log::debug('TelegramPoller: skipping update without update_id', $update);
                 continue;
             }
 
-            // Extract text content
-            $text = $message['text'] ?? $message['data'] ?? null; // callback_query.data
+            if (!$message) {
+                Log::debug('TelegramPoller: skipping update without message', ['update_id' => $updateId]);
+                continue;
+            }
 
-            // Determine sender
-            $from = $message['from'] ?? [];
-            $fromId = $from['id'] ?? null;
-            $fromName = trim(($from['first_name'] ?? '') . ' ' . ($from['last_name'] ?? ''));
+            $text = trim($message['text'] ?? '');
+            if (empty($text)) {
+                Log::debug('TelegramPoller: skipping update with empty text', ['update_id' => $updateId]);
+                continue;
+            }
 
-            // Chat info
-            $chat = $message['chat'] ?? [];
-            $chatId = $chat['id'] ?? null;
-
-            // Check for /task command — parse and create a task
-            $this->parseAndCreateTask($userId, $channelId, $text, $update);
-
-            // Save to activity_log (primary log for dashboard)
-            $this->db->insert('activity_log', [
-                'user_id' => $userId,
-                'channel' => 'telegram',
-                'channel_id' => $channelId,
-                'event_type' => $update['callback_query'] ? 'callback_query' : 'message',
-                'message' => $text,
-                'trigger_source' => 'telegram',
-                'metadata' => [
+            // Only handle /task commands
+            if (!str_starts_with($text, '/task')) {
+                Log::debug('TelegramPoller: ignoring non-/task message', [
                     'update_id' => $updateId,
-                    'from_id' => $fromId,
-                    'from_name' => $fromName,
-                    'chat_id' => $chatId,
-                    'raw_update' => $update,
-                ],
+                    'text'      => $text,
+                ]);
+                $lastUpdateId = $updateId;
+                continue;
+            }
+
+            // Parse title (everything after "/task ")
+            $title = preg_replace('#^/task\s*#i', '', $text);
+            $title = trim($title);
+
+            if (empty($title)) {
+                $this->warn("Connection {$connId}: /task received with no title, skipping.");
+                Log::warning('TelegramPoller: /task with empty title', [
+                    'conn_id'   => $connId,
+                    'update_id' => $updateId,
+                    'chat_id'   => $message['chat']['id'] ?? null,
+                ]);
+                $lastUpdateId = $updateId;
+                continue;
+            }
+
+            // ─── Create the task ────────────────────────────────────
+            $taskCreated = $this->createTaskFromTelegramMessage(
+                conn:    $conn,
+                title:   $title,
+                message: $message,
+                updateId: $updateId
+            );
+
+            if ($taskCreated) {
+                $tasksCreated++;
+                $this->info(sprintf(
+                    "  ✓ Task created: \"%s\" (chat=%s, update=%s)",
+                    $title,
+                    $message['chat']['id'] ?? '?',
+                    $updateId
+                ));
+            }
+
+            $lastUpdateId = $updateId;
+        }
+
+        // ─── Advance offset and update last_polled_at ─────────────────
+        $this->updatePollingOffset($connId, $lastUpdateId + 1);
+
+        return $tasksCreated;
+    }
+
+    /**
+     * Call Telegram getUpdates API.
+     * Returns null on error, empty array if no updates.
+     *
+     * @param string $botToken
+     * @param int    $offset   Current polling offset (update_id to start from)
+     * @return array|null
+     */
+    private function fetchUpdates(string $botToken, int $offset): ?array
+    {
+        $url = "https://api.telegram.org/bot{$botToken}/getUpdates";
+
+        $params = [
+            'timeout' => 55,           // long-poll timeout ( Telegram max 50s )
+            'offset'  => $offset,
+            'allowed_updates' => '["message","edited_message","callback_query"]',
+        ];
+
+        try {
+            $response = $this->http->get($url, ['query' => $params]);
+            $body = json_decode($response->getBody()->getContents(), true);
+
+            if (!($body['ok'] ?? false)) {
+                $description = $body['description'] ?? 'unknown';
+                Log::error('TelegramPoller: getUpdates returned not OK', [
+                    'bot_token' => substr($botToken, 0, 10) . '...',
+                    'description' => $description,
+                ]);
+                $this->error("getUpdates error: {$description}");
+                return null;
+            }
+
+            return $body['result'] ?? [];
+
+        } catch (GuzzleException $e) {
+            Log::error('TelegramPoller: getUpdates HTTP error', [
+                'error' => $e->getMessage(),
+                'bot_token' => substr($botToken, 0, 10) . '...',
             ]);
+            $this->error('getUpdates HTTP error: ' . $e->getMessage());
+            return null;
         }
     }
 
     /**
-     * Parse a Telegram message for /task commands and create a task.
+     * Create a task in the user's agent database.
      *
-     * Formats:
-     *   /task <title>                           — simple task
-     *   /task <title> --priority <high|urgent>  — with priority
-     *   /task <title> --due <YYYY-MM-DD>        — with due date
-     *   /task <title> --desc <description>      — with description
+     * Flow:
+     *   1. Resolve active agent for the connection's user_id
+     *   2. Configure AgentDatabaseService for that agent
+     *   3. Insert task into agent's tasks table
      */
-    private function parseAndCreateTask(string $userId, string $channelId, ?string $text, array $update): void
-    {
-        if (!$text || !str_starts_with(trim($text), '/task')) {
-            return;
+    private function createTaskFromTelegramMessage(
+        array $conn,
+        string $title,
+        array $message,
+        int $updateId
+    ): bool {
+        $userId  = $conn['user_id']  ?? null;
+        $connId  = $conn['id']       ?? null;
+        $chatId  = $message['chat']['id'] ?? null;
+        $chatTitle = $message['chat']['title'] ?? $message['chat']['username'] ?? "Chat {$chatId}";
+        $fromName  = trim(($message['from']['first_name'] ?? '') . ' ' . ($message['from']['last_name'] ?? ''));
+
+        if (!$userId) {
+            Log::error('TelegramPoller: cannot create task — no user_id on connection', [
+                'conn_id'   => $connId,
+                'update_id' => $updateId,
+            ]);
+            return false;
         }
 
-        $parsed = $this->parseTaskCommand($text);
-        if (!$parsed['title']) {
-            return;
+        // ─── Step 1: resolve active agent for this user ───────────
+        $agentConfig = $this->resolveActiveAgent($userId);
+        if (!$agentConfig) {
+            Log::error('TelegramPoller: no active agent for user, cannot create task', [
+                'conn_id' => $connId,
+                'user_id' => $userId,
+                'update_id' => $updateId,
+            ]);
+            $this->error("No active agent for user {$userId}, cannot create task.");
+            return false;
         }
 
-        $payload = [
-            'title'          => $parsed['title'],
-            'description'    => $parsed['description'] ?? null,
-            'priority'       => $parsed['priority'] ?? 'medium',
-            'due_date'       => $parsed['due_date'] ?? null,
-            'user_id'        => $userId,
-            'status'         => 'todo',
-            'channel_id'     => $channelId,
+        // ─── Step 2: configure AgentDatabaseService ─────────────────
+        $agentDb = clone $this->agentDbFactory;
+        $agentDb->setActiveAgent($agentConfig);
+
+        if (!$agentDb->hasAgent()) {
+            $this->error("Failed to configure agent DB for agent {$agentConfig['id']}");
+            return false;
+        }
+
+        // ─── Step 3: insert task ────────────────────────────────────
+        // title is the text after /task
+        // trigger_source = 'telegram'
+        // channel_id = channel_connections.id (the Telegram connection)
+        // user_id = the user who owns the connection
+        // status = 'backlog'
+        // description = original message text (for audit trail)
+        $taskPayload = [
+            'title'          => mb_substr($title, 0, 500),       // truncate to prevent DB errors
+            'description'   => sprintf(
+                "From Telegram %s%s\n\nOriginal: %s",
+                $chatTitle,
+                $fromName ? " ({$fromName})" : '',
+                $message['text'] ?? ''
+            ),
+            'status'         => 'backlog',
             'trigger_source' => 'telegram',
+            'channel_id'     => $connId,
+            'user_id'        => $userId,
             'position'       => 0,
         ];
 
-        $result = $this->db->insert('tasks', $payload);
-
-        if ($result['error'] ?? false) {
-            $this->warn("  Failed to create task from /task command: {$result['error']}");
-            return;
+        // Optionally set agent_id if the agent DB has an ai_agents record for this agent
+        if (!empty($agentConfig['id'])) {
+            $taskPayload['agent_id'] = $agentConfig['id'];
         }
 
-        $taskId = is_array($result[0] ?? null) ? ($result[0]['id'] ?? null) : ($result['id'] ?? null);
-        $this->info("  Created task from /task command: {$parsed['title']}" . ($taskId ? " (id: {$taskId})" : ''));
+        $result = $agentDb->insert('tasks', $taskPayload);
+
+        if (isset($result['error'])) {
+            Log::error('TelegramPoller: failed to insert task', [
+                'conn_id'    => $connId,
+                'user_id'    => $userId,
+                'agent_id'   => $agentConfig['id'] ?? null,
+                'title'      => $title,
+                'error'      => $result['error'],
+            ]);
+            $this->error("Failed to create task: " . ($result['error']['message'] ?? $result['error']));
+            return false;
+        }
+
+        Log::info('TelegramPoller: task created', [
+            'task_id'     => is_array($result) ? ($result[0]['id'] ?? $result['id'] ?? '?') : '?',
+            'conn_id'     => $connId,
+            'user_id'     => $userId,
+            'agent_id'    => $agentConfig['id'] ?? null,
+            'title'       => $title,
+            'update_id'   => $updateId,
+        ]);
+
+        return true;
     }
 
     /**
-     * Parse a /task command string into structured fields.
+     * Resolve the active agent configuration for a given user.
+     * Returns the agent config array (from the central agents table) or null.
      */
-    private function parseTaskCommand(string $text): array
+    private function resolveActiveAgent(string $userId): ?array
     {
-        $result = ['title' => null, 'priority' => null, 'due_date' => null, 'description' => null];
+        $serviceKey = config('supabase.service_role_key');
 
-        // Strip the /task prefix
-        $body = ltrim(preg_replace('#^/task\s*#i', '', $text));
-
-        // Extract --due <YYYY-MM-DD> (must appear before other --flags)
-        if (preg_match('/--due\s+(\d{4}-\d{2}-\d{2})/', $body, $m)) {
-            $result['due_date'] = $m[1] . 'T00:00:00+00:00';
-            $body = trim(preg_replace('/--due\s+\d{4}-\d{2}-\d{2}/', '', $body));
-        }
-
-        // Extract --priority <value>
-        if (preg_match('/--priority\s+(urgent|high|medium|low)/i', $body, $m)) {
-            $result['priority'] = strtolower($m[1]);
-            $body = trim(preg_replace('/--priority\s+(urgent|high|medium|low)/i', '', $body));
-        }
-
-        // Extract --desc <text> (everything after --desc until another --flag or end)
-        if (preg_match('/--desc\s+(.+?)(?=\s+--|\s*$)/i', $body, $m)) {
-            $result['description'] = trim($m[1]);
-            $body = trim(preg_replace('/--desc\s+.+?(?=\s+--|\s*$)/i', '', $body));
-        }
-
-        $result['title'] = trim($body);
-        return $result;
-    }
-
-    /**
-     * Look up the user_id for a channel connection.
-     */
-    private function getChannelUser(string $channelId): ?string
-    {
-        $result = $this->db->get('channel_connections', ['id' => "eq.{$channelId}"]);
-        if (!empty($result) && is_array($result[0] ?? null)) {
-            return $result[0]['user_id'] ?? null;
-        }
-        return null;
-    }
-
-    /**
-     * Log a polling error to the channel connection.
-     */
-    private function logError(string $channelId, string $errorMsg): void
-    {
-        $this->db->update('channel_connections',
-            ['id' => $channelId],
-            ['channel_meta' => ['last_error' => $errorMsg, 'error_at' => now()->toISOString()]]
+        // Step A: get the active agent_id from user_agent_access
+        $access = $this->supabase->get(
+            'user_agent_access',
+            [
+                'select'    => 'agent_id',
+                'user_id'   => "eq.{$userId}",
+                'is_active' => 'eq.true',
+                'limit'     => 1,
+            ],
+            $serviceKey
         );
+
+        if (!is_array($access) || count($access) === 0) {
+            Log::debug('TelegramPoller: no active agent access for user', ['user_id' => $userId]);
+            return null;
+        }
+
+        $agentId = $access[0]['agent_id'] ?? null;
+        if (!$agentId) {
+            return null;
+        }
+
+        // Step B: fetch the agent config (contains supabase_url, supabase_key, anon_key)
+        $agents = $this->supabase->get(
+            'agents',
+            [
+                'select'   => '*',
+                'id'       => "eq.{$agentId}",
+                'is_active'=> 'eq.true',
+                'limit'    => 1,
+            ],
+            $serviceKey
+        );
+
+        if (!is_array($agents) || count($agents) === 0) {
+            Log::warning('TelegramPoller: agent not found or inactive', ['agent_id' => $agentId]);
+            return null;
+        }
+
+        $agent = $agents[0];
+
+        // Validate required credentials
+        if (empty($agent['supabase_url']) || empty($agent['supabase_key'])) {
+            Log::error('TelegramPoller: agent missing Supabase credentials', [
+                'agent_id' => $agentId,
+                'has_url'  => !empty($agent['supabase_url']),
+                'has_key'  => !empty($agent['supabase_key']),
+            ]);
+            return null;
+        }
+
+        return $agent;
+    }
+
+    /**
+     * Update polling_offset and last_polled_at on the channel_connection.
+     */
+    private function updatePollingOffset(string $connId, int $offset): void
+    {
+        $serviceKey = config('supabase.service_role_key');
+
+        $result = $this->supabase->update(
+            'channel_connections',
+            ['id' => "eq.{$connId}"],
+            [
+                'polling_offset'  => $offset,
+                'last_polled_at'  => now()->toDateTimeString(),
+            ],
+            $serviceKey
+        );
+
+        if (isset($result['error'])) {
+            Log::error('TelegramPoller: failed to update polling offset', [
+                'conn_id' => $connId,
+                'offset'  => $offset,
+                'error'   => $result['error'],
+            ]);
+        }
     }
 }

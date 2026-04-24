@@ -74,7 +74,7 @@ class AgentDatabaseService
 
     public function get(string $table, array $params = [], string $bearerToken = null): array
     {
-        $this->ensureAgent();
+        if ($err = $this->ensureAgent()) return $err;
         try {
             $response = $this->client->get($table, [
                 'headers' => $this->authHeaders($bearerToken),
@@ -88,7 +88,7 @@ class AgentDatabaseService
 
     public function insert(string $table, array $data, string $bearerToken = null): array
     {
-        $this->ensureAgent();
+        if ($err = $this->ensureAgent()) return $err;
         try {
             $response = $this->client->post($table, [
                 'headers' => $this->authHeaders($bearerToken),
@@ -102,7 +102,7 @@ class AgentDatabaseService
 
     public function update(string $table, array $filters, array $data, string $bearerToken = null): array
     {
-        $this->ensureAgent();
+        if ($err = $this->ensureAgent()) return $err;
         try {
             $query = http_build_query($filters);
             $response = $this->client->patch("{$table}?{$query}", [
@@ -117,7 +117,7 @@ class AgentDatabaseService
 
     public function delete(string $table, array $filters, string $bearerToken = null): array
     {
-        $this->ensureAgent();
+        if ($err = $this->ensureAgent()) return $err;
         try {
             $query = http_build_query($filters);
             $response = $this->client->delete("{$table}?{$query}", [
@@ -134,7 +134,7 @@ class AgentDatabaseService
      */
     public function rpc(string $fnName, array $params = [], string $bearerToken = null): array
     {
-        $this->ensureAgent();
+        if ($err = $this->ensureAgent()) return $err;
         try {
             $response = $this->client->post("rpc/{$fnName}", [
                 'headers' => $this->authHeaders($bearerToken),
@@ -182,13 +182,15 @@ class AgentDatabaseService
         ];
     }
 
-    private function ensureAgent(): void
+    private function ensureAgent(): ?array
     {
         if ($this->client === null) {
-            throw new \RuntimeException(
-                'AgentDatabaseService: no active agent configured. '
-                . 'Call setActiveAgent() before querying data.'
-            );
+            return [
+                'error' => 'No active agent configured for this user. '
+                    . 'Ensure the user has an active agent assigned in user_agent_access.',
+                'code' => 'NO_ACTIVE_AGENT',
+            ];
         }
+        return null;
     }
 }
