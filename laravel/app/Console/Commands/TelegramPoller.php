@@ -104,7 +104,7 @@ class TelegramPoller extends Command
     private function pollConnection(array $conn): int
     {
         $connId    = $conn['id'] ?? 'unknown';
-        $botToken  = $conn['credentials']['bot_token'] ?? null;
+        $botToken  = $conn['bot_token'] ?? null;
         $offset    = intval($conn['polling_offset'] ?? 0);
         $userId    = $conn['user_id'] ?? null;
 
