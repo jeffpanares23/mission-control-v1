@@ -103,14 +103,23 @@ class TelegramPoller extends Command
      */
     private function pollConnection(array $conn): int
     {
-        $connId    = $conn['id'] ?? 'unknown';
-        $botToken  = $conn['bot_token'] ?? null;
-        $offset    = intval($conn['polling_offset'] ?? 0);
-        $userId    = $conn['user_id'] ?? null;
+        $connId = $conn['id'] ?? 'unknown';
+        $offset = intval($conn['polling_offset'] ?? 0);
+        $userId = $conn['user_id'] ?? null;
+
+        // Token lookup: bot_token column first, then credentials->bot_token fallback
+        $botToken = $conn['bot_token'] ?? null;
+        if (empty($botToken) && isset($conn['credentials']) && is_array($conn['credentials'])) {
+            $botToken = $conn['credentials']['bot_token'] ?? null;
+        }
 
         if (empty($botToken)) {
-            $this->warn("Connection {$connId}: no bot_token in credentials, skipping.");
-            Log::warning("TelegramPoller: no bot_token", ['conn_id' => $connId]);
+            $this->warn("Connection {$connId}: no bot_token found (tried bot_token column and credentials->bot_token), skipping.");
+            Log::warning("TelegramPoller: no bot_token", [
+                'conn_id' => $connId,
+                'has_bot_token_col' => array_key_exists('bot_token', $conn),
+                'has_credentials' => isset($conn['credentials']),
+            ]);
             return 0;
         }
 
