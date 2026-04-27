@@ -1,0 +1,16 @@
+app: mission-control-telegram-poller
+script: php
+args: "artisan telegram:poll --sleep=30"
+cwd: /root/mission-control-v1/laravel
+instances: 1
+autorestart: true
+max_restarts: 10
+min_uptime: 10s
+max_memory_restart: 256M
+exp_backoff_restart_delay: 1000
+listen_timeout: 60
+kill_timeout: 10
+wait_ready: false
+env:
+  APP_ENV: production
+  LARAVEL_ENV: production

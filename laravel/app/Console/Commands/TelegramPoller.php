@@ -42,14 +42,36 @@ class TelegramPoller extends Command
 
     public function handle(): int
     {
-        $this->info('Starting Telegram poll cycle...');
+        $once   = $this->option('once');
+        $sleep  = max(1, (int) $this->option('sleep'));
+        $cycle  = 0;
+
+        if ($once) {
+            $this->info('Running single poll cycle...');
+            $this->runCycle($cycle);
+            return Command::SUCCESS;
+        }
+
+        $this->info("Starting Telegram polling loop (sleep={$sleep}s between cycles).");
+        $this->info('Press Ctrl+C to stop.');
+
+        while (true) {
+            $cycle++;
+            $this->runCycle($cycle);
+            sleep($sleep);
+        }
+    }
+
+    private function runCycle(int $cycle): void
+    {
+        $this->info("--- Cycle {$cycle} ---");
 
         // ─── Load all active polling connections ──────────────────────
         $connections = $this->loadConnections();
 
         if (count($connections) === 0) {
             $this->warn('No active Telegram connections with polling enabled.');
-            return Command::SUCCESS;
+            return;
         }
 
         $this->info(sprintf('Found %d active connection(s).', count($connections)));
@@ -61,9 +83,7 @@ class TelegramPoller extends Command
             $totalCreated += $created;
         }
 
-        $this->info(sprintf('Poll cycle complete. %d task(s) created.', $totalCreated));
-
-        return Command::SUCCESS;
+        $this->info(sprintf('Cycle %d complete. %d task(s) created.', $cycle, $totalCreated));
     }
 
     // ─── Private helpers ────────────────────────────────────────────────
