@@ -386,10 +386,146 @@ export interface AgentOpsMetrics {
   alerts_count: number;
 }
 
+// ─── Agent Status Sync ────────────────────────────────────────
+export interface AgentStatusSyncPayload {
+  agent_id: string
+  tasks: Task[]
+  cron_jobs: CronJob[]
+  reminders: Reminder[]
+  scripts: ScriptPayload[]
+  notification_targets: NotificationTargetPayload[]
+  services: ServiceStatusPayload[]
+}
+
+export interface ScriptPayload {
+  id: string
+  name: string
+  description?: string
+  script_content?: string
+  file_path?: string
+  is_enabled: boolean
+  last_run_at?: string
+  run_count: number
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface NotificationTargetPayload {
+  id: string
+  channel: ChannelType
+  target_value: string
+  label?: string
+  is_enabled: boolean
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface ServiceStatusPayload {
+  id: string
+  name: string
+  status: 'running' | 'stopped' | 'error' | 'starting' | 'stopping'
+  pid?: number
+  memory_mb?: number
+  cpu_percent?: number
+  last_start_at?: string
+  last_stop_at?: string
+  restart_count: number
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentStatusSyncResponse {
+  synced_at: string
+  counts: {
+    tasks: number
+    cron_jobs: number
+    reminders: number
+    scripts: number
+    notification_targets: number
+    services: number
+  }
+  errors: string[]
+}
+
 // ─── Agent Ops Dashboard Summary ────────────────────────────
 export interface AgentOpsDashboardSummary {
   metrics: AgentOpsMetrics;
   channels: ChannelWithAgents[];
   recent_tasks: Task[];
   active_insights: OperationalInsight[];
+}
+
+// ══════════════════════════════════════════════════════════════
+// AGENT STATUS & SYNC — TYPES
+// ══════════════════════════════════════════════════════════════
+
+export type GatewayStatus = 'running' | 'paused' | 'error' | 'needs_attention';
+
+export interface AgentStatus {
+  gateway_status: GatewayStatus;
+  hermes_gateway: {
+    status: GatewayStatus;
+    last_heartbeat: string;
+    uptime_seconds: number;
+    version?: string;
+  };
+  supabase: {
+    connected: boolean;
+    last_check: string;
+    latency_ms?: number;
+  };
+  sync_state: {
+    last_sync_at: string | null;
+    is_syncing: boolean;
+    pending_changes: number;
+  };
+  current_services: CurrentService[];
+}
+
+export interface CurrentService {
+  name: string;
+  status: 'connected' | 'disconnected' | 'degraded';
+  message?: string;
+}
+
+export interface AgentCronJob {
+  id: string;
+  name: string;
+  schedule: string;
+  status: 'active' | 'paused' | 'error' | 'idle';
+  next_run: string | null;
+  last_run: string | null;
+  last_result?: 'success' | 'failed' | null;
+}
+
+export interface AgentTask {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  due_date: string | null;
+}
+
+export interface AgentReminder {
+  id: string;
+  text: string;
+  remind_at: string;
+  status: 'pending' | 'sent' | 'cancelled';
+}
+
+export interface AgentScript {
+  id: string;
+  name: string;
+  category: string;
+  last_used: string | null;
+}
+
+export interface AgentNotificationTarget {
+  id: string;
+  platform: ChannelType;
+  target_name: string;
+  is_active: boolean;
 }

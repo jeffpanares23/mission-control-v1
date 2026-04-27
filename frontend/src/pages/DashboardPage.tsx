@@ -3,14 +3,25 @@ import {
   Plus, Calendar, AlertTriangle, ArrowRight, GripVertical,
   Radio, Clock, Zap, CheckCircle2, XCircle, Pause, Play,
   BookOpen, FileText, ChevronRight, RefreshCw,
-  Bot, List, LayoutGrid, Loader, Edit2, Hash,
+  Bot, List, LayoutGrid, Loader, Edit2, Hash, AlertCircle,
+  FileCode, Bell, Server,
 } from 'lucide-react'
 import { cn, formatRelative } from '@/lib/utils'
 import { api } from '@/lib/api'
 import type {
   Task, TaskStatus, ChannelWithAgents, CronJob,
   KnowledgeFile, AgentOpsDashboardSummary,
+  AgentStatus, AgentCronJob, AgentTask,
+  AgentReminder, AgentScript, AgentNotificationTarget,
+  CurrentService,
 } from '@/types'
+import { AgentStatusCard } from '@/components/agent/AgentStatusCard'
+import { AgentTasksList } from '@/components/agent/AgentTasksList'
+import { AgentRemindersList } from '@/components/agent/AgentRemindersList'
+import { AgentScriptsList } from '@/components/agent/AgentScriptsList'
+import { AgentNotificationTargetsList } from '@/components/agent/AgentNotificationTargetsList'
+import { ServicesStatus } from '@/components/agent/ServicesStatus'
+import { AgentCronJobsList } from '@/components/agent/AgentCronJobsList'
 
 // ══════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -64,8 +75,49 @@ export function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [view, setView] = useState<'kanban' | 'list'>('kanban')
   const [loading, setLoading] = useState(true)
-  const [rightTab, setRightTab] = useState<'cron' | 'files' | 'insights'>('insights')
+  const [rightTab, setRightTab] = useState<'tasks' | 'cron' | 'files' | 'agent'>('agent')
 
+  // ── Agent Status State ───────────────────────────────────────
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null)
+  const [agentLoading, setAgentLoading] = useState(true)
+  const [agentCronJobs, setAgentCronJobs] = useState<AgentCronJob[]>([])
+  const [agentTasks, setAgentTasks] = useState<AgentTask[]>([])
+  const [agentReminders, setAgentReminders] = useState<AgentReminder[]>([])
+  const [agentScripts, setAgentScripts] = useState<AgentScript[]>([])
+  const [agentNotificationTargets, setAgentNotificationTargets] = useState<AgentNotificationTarget[]>([])
+  const [agentServices, setAgentServices] = useState<CurrentService[]>([])
+  const [syncing, setSyncing] = useState(false)
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null)
+
+  // ── Fetch Agent Data ────────────────────────────────────────
+  const fetchAgentData = async () => {
+    try {
+      const [status, cronJobs, agTasks, reminders, scripts, notifTargets, services] = await Promise.all([
+        api.agents.status().catch(() => null),
+        api.agents.cronJobs().catch(() => []),
+        api.agents.tasks().catch(() => []),
+        api.agents.reminders().catch(() => []),
+        api.agents.scripts().catch(() => []),
+        api.agents.notificationTargets().catch(() => []),
+        api.agents.services().catch(() => []),
+      ])
+      if (status) {
+        setAgentStatus(status)
+        setLastSyncAt(status.sync_state?.last_sync_at ?? new Date().toISOString())
+        setAgentServices(status.current_services ?? [])
+      }
+      setAgentCronJobs(cronJobs)
+      setAgentTasks(agTasks)
+      setAgentReminders(reminders)
+      setAgentScripts(scripts)
+      setAgentNotificationTargets(notifTargets)
+      setAgentServices(services)
+    } catch {
+      // silently fail — data may not be available yet
+    }
+  }
+
+  // ── Initial Load ─────────────────────────────────────────────
   useEffect(() => {
     Promise.all([
       api.agentOps.dashboard().catch(() => null),
@@ -75,7 +127,29 @@ export function DashboardPage() {
       if (tasksRes) setTasks(tasksRes)
       setLoading(false)
     })
+    fetchAgentData().finally(() => setAgentLoading(false))
   }, [])
+
+  // ── Poll Agent Status every 30s ─────────────────────────────
+  useEffect(() => {
+    const interval = setInterval(() => {
+      api.agents.status().then(status => {
+        setAgentStatus(status)
+        setLastSyncAt(status.sync_state?.last_sync_at ?? new Date().toISOString())
+      }).catch(() => {})
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // ── Sync Now Handler ────────────────────────────────────────
+  const handleSyncNow = async () => {
+    setSyncing(true)
+    try {
+      await api.agents.syncNow()
+      await fetchAgentData()
+    } catch { /* noop */ }
+    setSyncing(false)
+  }
 
   const metrics = opsData?.metrics ?? null
   const channels = opsData?.channels ?? []
@@ -83,7 +157,10 @@ export function DashboardPage() {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Header */}
-      <DashboardHeader view={view} setView={setView} metrics={metrics} loading={loading} />
+      <DashboardHeader
+        view={view} setView={setView} metrics={metrics} loading={loading}
+        syncing={syncing} lastSyncAt={lastSyncAt} onSyncNow={handleSyncNow}
+      />
 
       {/* Body — 3-column layout */}
       <div style={{
@@ -99,11 +176,29 @@ export function DashboardPage() {
           <KanbanBoard tasks={tasks} view={view} loading={loading} />
         </div>
 
-        {/* RIGHT — Cron Monitor + Knowledge Files */}
+        {/* RIGHT — Agent Status Card + Operations Panel */}
         <div style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {/* Agent Status Card — always visible at top of right column */}
+          <div style={{ borderBottom: '1px solid var(--color-border)', flexShrink: 0 }}>
+            <AgentStatusCard
+              agentStatus={agentStatus}
+              loading={agentLoading}
+              onSyncNow={handleSyncNow}
+              syncing={syncing}
+            />
+          </div>
+
+          {/* Operations Panel — tabs below */}
           <RightOpsPanel
             rightTab={rightTab}
             setRightTab={setRightTab}
+            agentCronJobs={agentCronJobs}
+            agentTasks={agentTasks}
+            agentReminders={agentReminders}
+            agentScripts={agentScripts}
+            agentNotificationTargets={agentNotificationTargets}
+            agentServices={agentServices}
+            agentLoading={agentLoading}
           />
         </div>
       </div>
@@ -116,10 +211,11 @@ export function DashboardPage() {
 // ══════════════════════════════════════════════════════════════
 
 function DashboardHeader({
-  view, setView, metrics, loading,
+  view, setView, metrics, loading, syncing, lastSyncAt, onSyncNow,
 }: {
   view: 'kanban' | 'list'; setView: (v: 'kanban' | 'list') => void
   metrics: AgentOpsDashboardSummary['metrics'] | null; loading: boolean
+  syncing: boolean; lastSyncAt: string | null; onSyncNow: () => Promise<void>
 }) {
   const m = metrics
   return (
@@ -149,8 +245,32 @@ function DashboardHeader({
         )}
       </div>
 
-      {/* Right: view toggle + new task */}
+      {/* Right: sync status + view toggle + new task */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+        {/* Sync status */}
+        {lastSyncAt && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            {syncing
+              ? <Loader className="w-[11px] h-[11px] animate-spin" style={{ color: 'var(--color-accent)' }} />
+              : <CheckCircle2 className="w-[11px] h-[11px]" style={{ color: '#10b981' }} />
+            }
+            <span style={{ fontSize: '10px', color: 'var(--color-text-3)' }}>
+              {syncing ? 'Syncing…' : `Synced ${formatRelative(lastSyncAt)}`}
+            </span>
+          </div>
+        )}
+
+        {/* Sync Now button */}
+        <button
+          onClick={onSyncNow}
+          disabled={syncing}
+          className="btn btn-secondary"
+          style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px' }}
+        >
+          <RefreshCw className={cn('w-[11px] h-[11px]', syncing && 'animate-spin')} />
+          Sync Now
+        </button>
+
         <div className="tab-toggle">
           <button onClick={() => setView('kanban')} className={view === 'kanban' ? 'active' : ''}>
             <LayoutGrid className="w-[12px] h-[12px]" />
@@ -587,18 +707,9 @@ function TaskListView({ tasks }: { tasks: Task[] }) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// AI INSIGHTS PANEL — Operational Alerts
+// AI INSIGHTS PANEL — Operational Alerts (replaced by Agent tab)
+// Kept for reference; not rendered in current layout
 // ══════════════════════════════════════════════════════════════
-
-interface InsightItem {
-  severity: 'critical' | 'warning' | 'info'
-  title: string
-  description: string
-  meta?: string
-  cta?: { label: string; onClick: () => void }
-}
-
-function InsightsPanel() {
   const [loading, setLoading] = useState(true)
   const [opsData, setOpsData] = useState<AgentOpsDashboardSummary | null>(null)
   const [cronJobs, setCronJobs] = useState<CronJob[]>([])
@@ -851,14 +962,72 @@ function InsightCard({ insight }: { insight: InsightItem }) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// AGENT TAB — Nested sub-sections for agent data
+// ══════════════════════════════════════════════════════════════
+
+type AgentSubTab = 'cron' | 'reminders' | 'scripts' | 'notif' | 'services'
+
+function AgentTabContent({
+  cronJobs, reminders, scripts, notificationTargets, services, loading,
+}: {
+  cronJobs: AgentCronJob[]
+  reminders: AgentReminder[]
+  scripts: AgentScript[]
+  notificationTargets: AgentNotificationTarget[]
+  services: CurrentService[]
+  loading: boolean
+}) {
+  const [subTab, setSubTab] = useState<AgentSubTab>('cron')
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {/* Sub-tab bar */}
+      <div style={{
+        display: 'flex', borderBottom: '1px solid var(--color-border)',
+        flexShrink: 0, padding: '0 4px',
+      }}>
+        <TabBtn active={subTab === 'cron'} onClick={() => setSubTab('cron')} icon={<Clock className="w-[10px] h-[10px]" />} label="Cron" />
+        <TabBtn active={subTab === 'reminders'} onClick={() => setSubTab('reminders')} icon={<AlertCircle className="w-[10px] h-[10px]" />} label="Reminders" />
+        <TabBtn active={subTab === 'scripts'} onClick={() => setSubTab('scripts')} icon={<FileCode className="w-[10px] h-[10px]" />} label="Scripts" />
+        <TabBtn active={subTab === 'notif'} onClick={() => setSubTab('notif')} icon={<Bell className="w-[10px] h-[10px]" />} label="Notif" />
+        <TabBtn active={subTab === 'services'} onClick={() => setSubTab('services')} icon={<Server className="w-[10px] h-[10px]" />} label="Services" />
+      </div>
+
+      {/* Sub-content */}
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        {subTab === 'cron'
+          ? <AgentCronJobsList jobs={cronJobs} loading={loading} />
+          : subTab === 'reminders'
+          ? <AgentRemindersList reminders={reminders} loading={loading} />
+          : subTab === 'scripts'
+          ? <AgentScriptsList scripts={scripts} loading={loading} />
+          : subTab === 'notif'
+          ? <AgentNotificationTargetsList targets={notificationTargets} loading={loading} />
+          : <ServicesStatus services={services} loading={loading} />
+        }
+      </div>
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════
 // RIGHT OPS PANEL — Cron Monitor + Knowledge Files + AI Insights
 // ══════════════════════════════════════════════════════════════
 
 function RightOpsPanel({
   rightTab, setRightTab,
+  agentCronJobs, agentTasks, agentReminders, agentScripts,
+  agentNotificationTargets, agentServices, agentLoading,
 }: {
-  rightTab: 'cron' | 'files' | 'insights'
-  setRightTab: (t: 'cron' | 'files' | 'insights') => void
+  rightTab: 'tasks' | 'cron' | 'files' | 'agent'
+  setRightTab: (t: 'tasks' | 'cron' | 'files' | 'agent') => void
+  agentCronJobs: AgentCronJob[]
+  agentTasks: AgentTask[]
+  agentReminders: AgentReminder[]
+  agentScripts: AgentScript[]
+  agentNotificationTargets: AgentNotificationTarget[]
+  agentServices: CurrentService[]
+  agentLoading: boolean
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -867,15 +1036,25 @@ function RightOpsPanel({
         display: 'flex', borderBottom: '1px solid var(--color-border)',
         flexShrink: 0, padding: '0 4px',
       }}>
-        <TabBtn active={rightTab === 'insights'} onClick={() => setRightTab('insights')} icon={<AlertTriangle className="w-[11px] h-[11px]" />} label="AI Insights" />
+        <TabBtn active={rightTab === 'agent'} onClick={() => setRightTab('agent')} icon={<Bot className="w-[11px] h-[11px]" />} label="Agent" />
+        <TabBtn active={rightTab === 'tasks'} onClick={() => setRightTab('tasks')} icon={<List className="w-[11px] h-[11px]" />} label="Tasks" />
         <TabBtn active={rightTab === 'cron'} onClick={() => setRightTab('cron')} icon={<Clock className="w-[11px] h-[11px]" />} label="Cron" />
         <TabBtn active={rightTab === 'files'} onClick={() => setRightTab('files')} icon={<BookOpen className="w-[11px] h-[11px]" />} label="Files" />
       </div>
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {rightTab === 'insights'
-          ? <InsightsPanel />
+        {rightTab === 'agent'
+          ? <AgentTabContent
+              cronJobs={agentCronJobs}
+              reminders={agentReminders}
+              scripts={agentScripts}
+              notificationTargets={agentNotificationTargets}
+              services={agentServices}
+              loading={agentLoading}
+            />
+          : rightTab === 'tasks'
+          ? <AgentTasksList tasks={agentTasks} loading={agentLoading} />
           : rightTab === 'cron'
           ? <CronMonitor />
           : <KnowledgePanel />

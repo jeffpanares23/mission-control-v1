@@ -16,6 +16,8 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\AgentHeartbeatController;
 use App\Http\Controllers\Api\AgentOpsController;
+use App\Http\Controllers\Api\AgentStatusSyncController;
+use App\Http\Controllers\Api\AgentDataController;
 use App\Http\Controllers\Api\TelegramPollingController;
 
 /*
@@ -96,6 +98,18 @@ Route::prefix('v1')->group(function () {
         // ─── Agent Heartbeat (Hermes pings every 10–30s) ───────────
         Route::post('agents/heartbeat',      [AgentHeartbeatController::class, 'beat']);
         Route::get('agents/{id}/status',     [AgentHeartbeatController::class, 'status']);
+
+        // ─── Agent Status Sync (Hermes bulk sync) ───────────────────
+        Route::post('agents/status-sync',    [AgentStatusSyncController::class, 'sync']);
+
+        // ─── Agent Data (Dashboard reads) ───────────────────────────
+        Route::get('agents/status',           [AgentDataController::class, 'status']);
+        Route::get('agents/cron-jobs',        [AgentDataController::class, 'cronJobs']);
+        Route::get('agents/tasks',            [AgentDataController::class, 'tasks']);
+        Route::get('agents/reminders',        [AgentDataController::class, 'reminders']);
+        Route::get('agents/scripts',           [AgentDataController::class, 'scripts']);
+        Route::get('agents/notification-targets', [AgentDataController::class, 'notificationTargets']);
+        Route::get('agents/services',          [AgentDataController::class, 'services']);
 
         // ─── Settings ───────────────────────────────────────────────
         Route::get('settings',              [SettingsController::class, 'index']);

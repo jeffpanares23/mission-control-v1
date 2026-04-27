@@ -9,7 +9,11 @@ import type {
   Reminder, Schedule, Insight,
   ChannelConnection, DashboardSummary,
   ChannelWithAgents, CronJob, KnowledgeFile,
-  AgentOpsDashboardSummary,
+  AgentOpsDashboardSummary, AgentStatusSyncPayload,
+  AgentStatusSyncResponse,
+  AgentStatus, AgentCronJob, AgentTask,
+  AgentReminder, AgentScript, AgentNotificationTarget,
+  CurrentService,
 } from '@/types'
 
 // ─── Auth types (Laravel JWT auth) ───────────────────────────
@@ -269,6 +273,25 @@ export const api = {
     list: () => get('/agent-statuses'),
     heartbeat: (agentName: string, status: string) =>
       post('/agent-statuses/heartbeat', { agent_name: agentName, status }),
+    /**
+     * POST /api/v1/agents/status-sync
+     * Bulk-syncs all agent operational state (tasks, cron_jobs, reminders,
+     * scripts, notification_targets, services) to Supabase via Laravel.
+     */
+    statusSync: (payload: AgentStatusSyncPayload) =>
+      post<AgentStatusSyncResponse>('/agents/status-sync', payload),
+  },
+
+  // ─── Hermes Agent Status & Sync ──────────────────────────────
+  agents: {
+    status: () => get<AgentStatus>('/agents/status'),
+    syncNow: () => post<{ triggered: boolean }>('/agents/status-sync'),
+    cronJobs: () => get<AgentCronJob[]>('/agents/cron-jobs'),
+    tasks: () => get<AgentTask[]>('/agents/tasks'),
+    reminders: () => get<AgentReminder[]>('/agents/reminders'),
+    scripts: () => get<AgentScript[]>('/agents/scripts'),
+    notificationTargets: () => get<AgentNotificationTarget[]>('/agents/notification-targets'),
+    services: () => get<CurrentService[]>('/agents/services'),
   },
 
   // ─── Agent Operations Dashboard ──────────────────────────────
