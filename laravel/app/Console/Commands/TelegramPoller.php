@@ -95,6 +95,15 @@ class TelegramPoller extends Command
             return [];
         }
 
+        // Debug: log what we received
+        $this->line(sprintf('loadConnections: got %d rows', count($result)));
+        Log::debug('TelegramPoller: loadConnections raw result', [
+            'result_keys' => array_keys($result),
+            'first_row_keys' => isset($result[0]) ? array_keys($result[0]) : [],
+            'first_row_bot_token' => isset($result[0]['bot_token']) ? substr($result[0]['bot_token'], 0, 10) . '...' : null,
+            'first_row_has_credentials' => isset($result[0]['credentials']),
+        ]);
+
         return is_array($result) ? $result : [];
     }
 
